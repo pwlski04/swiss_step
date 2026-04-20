@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rendertheme
+    xmlns="http://mapsforge.org/renderTheme"
+    version="1"
+    map-background="#F4F4F4"
+    base-stroke-width="1"
+    base-text-size="1">
+
+    <!-- Clearly walkable paths -->
+    <rule e="way" k="highway" v="footway|path|pedestrian|steps">
+        <line stroke="lightblue" stroke-width="1.4" />
+    </rule>
+
+    <!-- Shared walking streets -->
+    <rule e="way" k="highway" v="living_street|track">
+        <line stroke="#darkblue" stroke-width="1.2" />
+    </rule>
+
+</rendertheme>
