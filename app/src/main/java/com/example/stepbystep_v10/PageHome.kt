@@ -35,7 +35,7 @@ fun Page_Home() {
             mapFilePath = paths.first
             themeFilePath = paths.second
         } catch (e: Exception) {
-            errorMessage = e.message ?: "Unknown error"
+            errorMessage = "${e::class.java.simpleName}: ${e.message}"
         }
     }
 
@@ -70,6 +70,7 @@ fun OfflineMapScreen(
     }
 
     AndroidView(
-        modifier = modifier.fillMaxSize(), factory = { mapView })
+        modifier = modifier.fillMaxSize(), factory = { mapView }
+    )
 
 }

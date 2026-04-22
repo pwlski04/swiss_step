@@ -6,14 +6,24 @@
     base-stroke-width="1"
     base-text-size="1">
 
-    <!-- Clearly walkable paths -->
-    <rule e="way" k="highway" v="footway|path|pedestrian|steps">
-        <line stroke="lightblue" stroke-width="1.4" />
+    <!-- buildings -->
+    <rule e="way" k="building" v="*">
+        <area fill="#D8D8D8" />
     </rule>
 
-    <!-- Shared walking streets -->
-    <rule e="way" k="highway" v="living_street|track">
-        <line stroke="#darkblue" stroke-width="1.2" />
+    <!-- water -->
+    <rule e="way" k="natural" v="water">
+        <area fill="#DCEEFF" />
+    </rule>
+
+    <!-- Rivers / streams -->
+    <rule e="way" k="waterway" v="river|stream|canal">
+        <line stroke="#DCEEFF" stroke-width="0.8" />
+    </rule>
+
+    <!-- Walking streets -->
+    <rule e="way" k="highway" v="footway|path|pedestrian|steps|living_street|track">
+        <line stroke="#00008B" stroke-width="1.0" />
     </rule>
 
 </rendertheme>
