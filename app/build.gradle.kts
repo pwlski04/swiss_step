@@ -60,4 +60,6 @@ dependencies {
     implementation(libs.mapsforge.themes)
 
     implementation(libs.osmdroid.android)
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("androidx.compose.material:material-icons-extended")
 }
