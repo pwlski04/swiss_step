@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -23,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
@@ -38,6 +39,9 @@ fun Page_Home() {
     var hasLocationPermission by remember { mutableStateOf(false) }
     var isTracking by remember { mutableStateOf(false) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
+
+    var pathList by remember { mutableStateOf<List<Path>>(emptyList()) }
+    var overlayPathsDrawn by remember { mutableStateOf(false) }
 
     var currentSessionId by remember { mutableStateOf(System.currentTimeMillis()) }
 
@@ -55,15 +59,30 @@ fun Page_Home() {
 
         try {
             val paths = withContext(Dispatchers.IO) {
-                val mapPath = copyAssetToInternalStorage(context, "switzerland.map")
+                val mapPath = copyAssetToInternalStorage(context, "zurich.map")
                 val themePath = copyAssetToInternalStorage(context, "minmap.xml")
                 mapPath to themePath
             }
 
             mapFilePath = paths.first
             themeFilePath = paths.second
+
+            pathList = withContext(Dispatchers.IO){
+                loadPathsFromGeoJson(context)
+            }
+
         } catch (e: Exception) {
             errorMessage = "${e::class.java.simpleName}: ${e.message}"
+        }
+    }
+
+    LaunchedEffect(mapView, pathList) {
+        val mv = mapView
+
+        if(mv != null && pathList.isNotEmpty() && !overlayPathsDrawn){
+            drawAllPaths(mapView = mv, paths = pathList)
+
+            overlayPathsDrawn = true
         }
     }
 
@@ -103,7 +122,7 @@ fun Page_Home() {
             ) {
                 if (!hasLocationPermission) {
                     permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)}
-                else{
+                else {
                     OfflineMapScreen(
                         modifier = Modifier.fillMaxSize(),
                         mapFilePath = mapFilePath!!,
@@ -120,6 +139,7 @@ fun Page_Home() {
                     )
                 }
 
+                // BUTTON: START/STOP TRACKING
                 Surface(
                     onClick = {
                         if (!isTracking) {
@@ -145,6 +165,41 @@ fun Page_Home() {
                         modifier = Modifier.padding(14.dp)
                     )
                 }
+
+
+                Column (modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 12.dp, start = 12.dp)){
+                    //BUTTON: ZOOM IN
+                    Surface(
+                        onClick = {},
+                        shape = RoundedCornerShape(18.dp),
+                        tonalElevation = 6.dp,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier.padding(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "Zoom in",
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+
+                    //BUTTON: ZOOM OUT
+                    Surface(
+                        onClick = {},
+                        shape = RoundedCornerShape(18.dp),
+                        tonalElevation = 6.dp,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier.padding(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Remove,
+                            contentDescription = "Zoom out",
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                }
+
+
             }
         }
 
@@ -167,7 +222,7 @@ fun OfflineMapScreen(
     val context = LocalContext.current
 
     val mapView = remember(mapFilePath, themeFilePath) {
-        createMapsforgeView(context, mapFilePath, themeFilePath)
+        createMapView(context, mapFilePath, themeFilePath)
     }
 
     LaunchedEffect(mapView) {

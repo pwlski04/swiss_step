@@ -11,14 +11,26 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 
-class LocationTracker(
-    context: Context,
-    private val onLocation: (Location) -> Unit
-) {
-    private val fusedLocationClient =
-        LocationServices.getFusedLocationProviderClient(context)
+class LocationTracker(context: Context, private val onLocation: (Location) -> Unit) {
+    /* Main functions */
+    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
 
-    private val request = LocationRequest.Builder(
+    @SuppressLint("MissingPermission")
+    fun start() {
+        fusedLocationClient.requestLocationUpdates(
+            request,
+            callback,
+            Looper.getMainLooper()
+        )
+    }
+
+    fun stop() {
+        fusedLocationClient.removeLocationUpdates(callback)
+    }
+
+
+    /* Helper functions */
+    private val request = LocationRequest.Builder(      // Sends location request every 3 seconds (offline and even in the same spot)
         Priority.PRIORITY_HIGH_ACCURACY,
         3000L
     )
@@ -32,18 +44,5 @@ class LocationTracker(
                 onLocation(location)
             }
         }
-    }
-
-    @SuppressLint("MissingPermission")
-    fun start() {
-        fusedLocationClient.requestLocationUpdates(
-            request,
-            callback,
-            Looper.getMainLooper()
-        )
-    }
-
-    fun stop() {
-        fusedLocationClient.removeLocationUpdates(callback)
     }
 }

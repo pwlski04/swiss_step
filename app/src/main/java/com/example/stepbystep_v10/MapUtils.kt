@@ -23,43 +23,31 @@ import org.mapsforge.core.graphics.Bitmap as MapsforgeBitmap
 import org.mapsforge.map.layer.overlay.Marker
 import android.graphics.drawable.BitmapDrawable
 import android.location.Location
+import androidx.core.graphics.createBitmap
 
 
+fun copyAssetToInternalStorage(context: Context, assetName: String): String {
+    """ Copies a file into the device's internal storage """
 
-/* HELPER FUNCTIONS: */
-
-fun copyAssetToInternalStorage(
-    context: Context,
-    assetName: String
-): String {
+    // Create the file/directory
     val outFile = File(context.filesDir, assetName)
 
+    // Copy the file over
     if (!outFile.exists() || outFile.length() == 0L) {
         context.assets.open(assetName).use { input ->
-            outFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
+            outFile.outputStream().use { output -> input.copyTo(output) }
         }
     }
 
+    // Return the copied file
     return outFile.absolutePath
 }
 
-fun distanceMeters(
-    lat1: Double,
-    lon1: Double,
-    lat2: Double,
-    lon2: Double
-): Double {
-    val result = FloatArray(1)
+fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    """ Stores and returns the distance in meters between point 1 (lat1, lon1) and point 2 (lat2, lon2) in result """
 
-    Location.distanceBetween(
-        lat1,
-        lon1,
-        lat2,
-        lon2,
-        result
-    )
+    val result = FloatArray(1)
+    Location.distanceBetween(lat1,lon1,lat2,lon2,result)
 
     return result[0].toDouble()
 }
@@ -68,11 +56,7 @@ fun distanceMeters(
 
 /* CREATE MAP: */
 
-fun createMapsforgeView(
-    context: Context,
-    mapFilePath: String,
-    themeFilePath: String
-): MapView {
+fun createMapView(context: Context, mapFilePath: String, themeFilePath: String): MapView {
     val mapFileOnDisk = File(mapFilePath)
     require(mapFileOnDisk.exists()) { "Map file does not exist: $mapFilePath" }
     require(mapFileOnDisk.length() > 0L) { "Map file is empty: $mapFilePath" }
@@ -80,8 +64,8 @@ fun createMapsforgeView(
     val mapDataStore = MapFile(mapFileOnDisk)
 
     val mapView = MapView(context)
-    mapView.setBuiltInZoomControls(true)
-    mapView.mapScaleBar.isVisible = true
+    mapView.setBuiltInZoomControls(false)
+    mapView.mapScaleBar.isVisible = false
 
     val tileCache: TileCache = AndroidUtil.createTileCache(
         context,
@@ -122,14 +106,8 @@ fun createMapsforgeView(
 
 /* MODIFY MAP ELEMENTS: */
 
-fun createDotBitmap(
-    context: Context,
-    sizePx: Int,
-    red: Int,
-    green: Int,
-    blue: Int
-): MapsforgeBitmap {
-    val androidBitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: Int): MapsforgeBitmap {
+    val androidBitmap = createBitmap(sizePx, sizePx)
     val canvas = Canvas(androidBitmap)
 
     val paint = AndroidPaint().apply {
@@ -144,22 +122,13 @@ fun createDotBitmap(
     return AndroidGraphicFactory.convertToBitmap(BitmapDrawable(androidBitmap))
 }
 
-fun addLatestDotIfNeeded(
-    context: Context,
-    mapView: MapView,
-    points: List<PathPoint>
-) {
+fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>) {
     if (points.isEmpty()) return
 
     val latestPoint = points.last()
 
     val alreadyHasNearbyDot = points.dropLast(1).any { oldPoint ->
-        distanceMeters(
-            oldPoint.lat,
-            oldPoint.lon,
-            latestPoint.lat,
-            latestPoint.lon
-        ) < 3.3
+        distanceMeters(oldPoint.lat, oldPoint.lon, latestPoint.lat, latestPoint.lon) < 3.3
     }
 
     if (alreadyHasNearbyDot) {
@@ -197,12 +166,32 @@ fun addLatestDotIfNeeded(
     mapView.layerManager.layers.add(marker)
 }
 
+fun drawAllPaths(mapView: MapView, paths: List<Path>) {
+    val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+        color = AndroidGraphicFactory.INSTANCE.createColor(255, 255, 165, 0)
+        strokeWidth = 8f
+        setStyle(org.mapsforge.core.graphics.Style.STROKE)
+    }
+
+    for (path in paths) {
+        val polyline = Polyline(paint, AndroidGraphicFactory.INSTANCE)
+
+        for (point in path.points) {
+            polyline.latLongs.add(point)
+        }
+
+        mapView.layerManager.layers.add(polyline)
+    }
+
+    mapView.layerManager.redrawLayers()
+}
+
 fun removeRouteLayers(mapView: MapView){
     val layers = mapView.layerManager.layers
     val toRemove = mutableListOf<Layer>()
 
     for(layer in layers){
-        if(layer is Polyline || layer is Marker){
+        if(layer is Marker){
             toRemove.add(layer)
         }
     }
@@ -210,63 +199,4 @@ fun removeRouteLayers(mapView: MapView){
     for(layer in toRemove){
         layers.remove(layer)
     }
-}
-
-
-
-
-/* OLD, UNUSED FUNCTIONS: */
-fun removeExistingPolylines(mapView: MapView) {
-    val layers = mapView.layerManager.layers
-    val toRemove = mutableListOf<Layer>()
-
-    for (layer in layers) {
-        if (layer is Polyline) {
-            toRemove.add(layer)
-        }
-    }
-
-    for (layer in toRemove) {
-        layers.remove(layer)
-    }
-}
-
-fun addRouteOverlay(
-    context: Context,
-    mapView: MapView,
-    points: List<PathPoint>
-) {
-    if (points.isEmpty()) return
-
-    for ((index, point) in points.withIndex()) {
-
-        val dotBitmap = if (index % 2 == 0) {
-            createDotBitmap(
-                context = context,
-                sizePx = 48,
-                red = 255,
-                green = 0,
-                blue = 0
-            )
-        } else {
-            createDotBitmap(
-                context = context,
-                sizePx = 48,
-                red = 0,
-                green = 255,
-                blue = 0
-            )
-        }
-
-        val marker = Marker(
-            LatLong(point.lat, point.lon),
-            dotBitmap,
-            -24,
-            -24
-        )
-
-        mapView.layerManager.layers.add(marker)
-    }
-
-    mapView.layerManager.redrawLayers()
 }
