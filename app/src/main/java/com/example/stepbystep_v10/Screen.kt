@@ -26,9 +26,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 
 @Composable
 fun Screen() {
@@ -46,7 +48,6 @@ fun Screen() {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .statusBarsPadding()
         ) {
             when (page) {
                 0 -> Page_Home()
@@ -65,10 +66,10 @@ fun NavBar(modifier: Modifier = Modifier, currentPage: Int, onPageChange: (Int) 
     Row(
         modifier
             .fillMaxWidth()
-            .background(Color.LightGray)
-            .padding(8.dp),
+            .background(Color(red = 232, green = 232, blue = 232, 255))
+            .padding(4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceAround
+        horizontalArrangement = Arrangement.SpaceAround,
     ) {
         NavBarIsland(
             color = Color.Black,
@@ -89,11 +90,11 @@ fun NavBarIsland(color: Color, icon: ImageVector?, description: String, onClick:
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .clickable { onClick() }
-            .padding(8.dp),
+            .padding(12.dp),
     ) {
         Box(
             contentAlignment = Alignment.Center, modifier = Modifier
-                .size(25.dp)
+                .size(24.dp)
                 .background(
                     if (icon == null) color else Color.Transparent
                 )

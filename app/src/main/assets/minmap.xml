@@ -8,7 +8,7 @@
 
     <!-- buildings -->
     <rule e="way" k="building" v="*">
-        <area fill="#D8D8D8" />
+        <area fill="#EEEEEE" />
     </rule>
 
     <!-- water -->
@@ -23,7 +23,7 @@
 
     <!-- Walking streets -->
     <rule e="way" k="highway" v="footway|path|pedestrian|steps|living_street|track">
-        <line stroke="#00008B" stroke-width="1.0" />
+        <line stroke="#DDDDDD" stroke-width="1.0" />
     </rule>
 
 </rendertheme>

@@ -15,3 +15,22 @@ data class PathPoint (
     val timestamp: Long,
     val sessionId: Long
 )
+
+data class MatchedSegment(
+    val path: Path,
+    val segmentIndex: Int,
+    val distanceMeters: Double
+)
+
+data class IndexedSegment(
+    val path: Path,
+    val segmentIndex: Int,
+    val ax: Double,
+    val ay: Double,
+    val bx: Double,
+    val by: Double,
+    val minX: Double,
+    val maxX: Double,
+    val minY: Double,
+    val maxY: Double,
+)

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
@@ -40,8 +41,18 @@ fun Page_Home() {
     var isTracking by remember { mutableStateOf(false) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
 
-    var pathList by remember { mutableStateOf<List<Path>>(emptyList()) }
-    var overlayPathsDrawn by remember { mutableStateOf(false) }
+    val walkedSegmentIds = remember { mutableSetOf<String>() }
+    var allPaths by remember { mutableStateOf<List<Path>>(emptyList()) }
+    val projector = remember { LocalProjector(originLat = 47.3769) }
+
+    val segmentIndex = remember(allPaths) {
+        if (allPaths.isEmpty()) null
+        else SegmentGridIndex(
+            paths = allPaths,
+            projector = projector,
+            cellSizeMeters = 20.0
+        )
+    }
 
     var currentSessionId by remember { mutableStateOf(System.currentTimeMillis()) }
 
@@ -49,6 +60,19 @@ fun Page_Home() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasLocationPermission = granted
+    }
+
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        hasLocationPermission = granted
+
+        if (!granted) {
+            permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -67,7 +91,7 @@ fun Page_Home() {
             mapFilePath = paths.first
             themeFilePath = paths.second
 
-            pathList = withContext(Dispatchers.IO){
+            allPaths = withContext(Dispatchers.IO) {
                 loadPathsFromGeoJson(context)
             }
 
@@ -76,17 +100,8 @@ fun Page_Home() {
         }
     }
 
-    LaunchedEffect(mapView, pathList) {
-        val mv = mapView
 
-        if(mv != null && pathList.isNotEmpty() && !overlayPathsDrawn){
-            drawAllPaths(mapView = mv, paths = pathList)
-
-            overlayPathsDrawn = true
-        }
-    }
-
-    val tracker = remember(currentSessionId) {
+    val tracker = remember(currentSessionId, segmentIndex) {
         LocationTracker(context) { location ->
             scope.launch {
                 val point = PathPoint(
@@ -102,7 +117,11 @@ fun Page_Home() {
                     .filter { it.sessionId == currentSessionId }
 
                 mapView?.let { mv ->
-                    addLatestDotIfNeeded(context = context, mapView = mv, points = sessionPoints)
+                    val index = segmentIndex
+                    if (index != null) {
+                        addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegmentIds, index)
+                    }
+
                     mv.setCenter(LatLong(location.latitude, location.longitude))
                     mv.layerManager.redrawLayers()
                 }
@@ -121,8 +140,11 @@ fun Page_Home() {
                 modifier = Modifier.fillMaxSize()
             ) {
                 if (!hasLocationPermission) {
-                    permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)}
-                else {
+                    Text(
+                        text = "Location permission needed.",
+                        modifier = Modifier.padding(16.dp)
+                    )
+                } else {
                     OfflineMapScreen(
                         modifier = Modifier.fillMaxSize(),
                         mapFilePath = mapFilePath!!,
@@ -133,44 +155,92 @@ fun Page_Home() {
                             val sessionPoints = PathFunctions.getAllPoints()
                                 .filter { it.sessionId == currentSessionId }
 
-                            addLatestDotIfNeeded(context, readyMapView, sessionPoints)
+                            val index = segmentIndex
+                            addLatestDotIfNeeded(context, readyMapView, sessionPoints, walkedSegmentIds, index)
                             readyMapView.layerManager.redrawLayers()
                         }
                     )
                 }
-
-                // BUTTON: START/STOP TRACKING
+                
                 Surface(
-                    onClick = {
-                        if (!isTracking) {
-                            currentSessionId = System.currentTimeMillis()
-                            mapView?.let { removeRouteLayers(it) }
-                            tracker.start()
-                            isTracking = true
-                        } else {
-                            tracker.stop()
-                            isTracking = false
-                        }
-                    },
                     shape = RoundedCornerShape(18.dp),
                     tonalElevation = 6.dp,
                     shadowElevation = 8.dp,
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 16.dp, end = 16.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isTracking) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (isTracking) "Stop tracking" else "Start tracking",
-                        modifier = Modifier.padding(14.dp)
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp)
+                ){
+                    Text("Hello World", modifier = Modifier
+                        .width(160.dp)
+                        .padding(top = 16.dp, bottom = 16.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
+                }
+
+
+                Column(modifier = Modifier.align(Alignment.TopEnd)){
+                    Surface(
+                        // BUTTON: START/STOP TRACKING
+                        onClick = {
+                            if (!hasLocationPermission) {
+                                permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                                return@Surface
+                            }
+
+                            if (!isTracking) {
+                                val newSessionId = System.currentTimeMillis()
+                                currentSessionId = newSessionId
+
+                                tracker.start()
+                                isTracking = true
+                            } else {
+                                tracker.stop()
+                                isTracking = false
+                            }
+                        },
+                        shape = RoundedCornerShape(18.dp),
+                        tonalElevation = 6.dp,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier
+                            .padding(top = 16.dp, end = 16.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isTracking) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = if (isTracking) "Stop tracking" else "Start tracking",
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+
+
+                    if(!isTracking) {
+                        Surface(
+                            //BUTTON: REMOVE HISTORY
+                            onClick = {
+                                mapView?.let { removeWalkedRoutes(it) }
+                                walkedSegmentIds.clear() },
+                            shape = RoundedCornerShape(18.dp),
+                            tonalElevation = 6.dp,
+                            shadowElevation = 8.dp,
+                            modifier = Modifier
+                                .padding(top = 16.dp, end = 16.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.DeleteOutline,
+                                contentDescription = "Remove history",
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                    }
                 }
 
 
                 Column (modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 12.dp, start = 12.dp)){
                     //BUTTON: ZOOM IN
                     Surface(
-                        onClick = {},
+                        onClick = { mapView?.let { mv ->
+                            val currentZoom = mv.model.mapViewPosition.zoomLevel
+                            mv.setZoomLevel((currentZoom + 1).toByte())
+                        }},
                         shape = RoundedCornerShape(18.dp),
                         tonalElevation = 6.dp,
                         shadowElevation = 8.dp,
@@ -185,7 +255,10 @@ fun Page_Home() {
 
                     //BUTTON: ZOOM OUT
                     Surface(
-                        onClick = {},
+                        onClick = { mapView?.let { mv ->
+                            val currentZoom = mv.model.mapViewPosition.zoomLevel
+                            mv.setZoomLevel((currentZoom - 1).toByte())
+                        }},
                         shape = RoundedCornerShape(18.dp),
                         tonalElevation = 6.dp,
                         shadowElevation = 8.dp,
@@ -198,8 +271,6 @@ fun Page_Home() {
                         )
                     }
                 }
-
-
             }
         }
 

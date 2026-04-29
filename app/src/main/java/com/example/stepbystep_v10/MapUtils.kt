@@ -26,36 +26,8 @@ import android.location.Location
 import androidx.core.graphics.createBitmap
 
 
-fun copyAssetToInternalStorage(context: Context, assetName: String): String {
-    """ Copies a file into the device's internal storage """
-
-    // Create the file/directory
-    val outFile = File(context.filesDir, assetName)
-
-    // Copy the file over
-    if (!outFile.exists() || outFile.length() == 0L) {
-        context.assets.open(assetName).use { input ->
-            outFile.outputStream().use { output -> input.copyTo(output) }
-        }
-    }
-
-    // Return the copied file
-    return outFile.absolutePath
-}
-
-fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    """ Stores and returns the distance in meters between point 1 (lat1, lon1) and point 2 (lat2, lon2) in result """
-
-    val result = FloatArray(1)
-    Location.distanceBetween(lat1,lon1,lat2,lon2,result)
-
-    return result[0].toDouble()
-}
-
-
 
 /* CREATE MAP: */
-
 fun createMapView(context: Context, mapFilePath: String, themeFilePath: String): MapView {
     val mapFileOnDisk = File(mapFilePath)
     require(mapFileOnDisk.exists()) { "Map file does not exist: $mapFilePath" }
@@ -104,8 +76,7 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
 
 
 
-/* MODIFY MAP ELEMENTS: */
-
+/* ADD OVERLAY DOTS: EXACT LCOATION FOR POSITION TRACKING */
 fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: Int): MapsforgeBitmap {
     val androidBitmap = createBitmap(sizePx, sizePx)
     val canvas = Canvas(androidBitmap)
@@ -122,7 +93,7 @@ fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: I
     return AndroidGraphicFactory.convertToBitmap(BitmapDrawable(androidBitmap))
 }
 
-fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>) {
+fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>, walkedSegmentIds: MutableSet<String>, segmentIndex: SegmentGridIndex?) {
     if (points.isEmpty()) return
 
     val latestPoint = points.last()
@@ -131,61 +102,70 @@ fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPo
         distanceMeters(oldPoint.lat, oldPoint.lon, latestPoint.lat, latestPoint.lon) < 3.3
     }
 
-    if (alreadyHasNearbyDot) {
-        return
-    }
+    if (alreadyHasNearbyDot) return
 
     val latestIndex = points.size - 1
     val latestIsRed = latestIndex % 2 == 0
 
-    val sameDotAlreadyExists = points.dropLast(1).withIndex().any { (index, oldPoint) ->
-        val oldIsRed = index % 2 == 0
-
-        oldPoint.lat == latestPoint.lat && oldPoint.lon == latestPoint.lon && oldIsRed == latestIsRed
-    }
-
-    if (sameDotAlreadyExists) {
-        return
-    }
-
     val sizePx = 72
 
     val dotBitmap = if (latestIsRed) {
-        createDotBitmap(context = context, sizePx = sizePx, red = 255, green = 0, blue = 0)
+        createDotBitmap(context, sizePx, red = 255, green = 0, blue = 0)
     } else {
-        createDotBitmap(context = context, sizePx = sizePx, red = 0, green = 255, blue = 0)
+        createDotBitmap(context, sizePx, red = 0, green = 255, blue = 0)
     }
 
     val marker = Marker(
         LatLong(latestPoint.lat, latestPoint.lon),
         dotBitmap,
-        -sizePx / 2,
-        -sizePx / 2
+        0,
+        0
     )
 
+    segmentIndex?.let { index ->
+        addPathIfNeeded(
+            mapView,
+            latestPoint,
+            walkedSegmentIds,
+            segmentIndex,
+            maxDistanceMeters = 3.0
+        )
+    }
+
     mapView.layerManager.layers.add(marker)
+    mapView.layerManager.redrawLayers()
 }
 
-fun drawAllPaths(mapView: MapView, paths: List<Path>) {
+
+
+/* OVERLAY PATHS: DISPLAY WALKED PATHS */
+fun addPathIfNeeded(mapView: MapView, point: PathPoint, walkedSegmentIds: MutableSet<String>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double) {
+    val currSegment = segmentIndex.findClosest(point, maxDistanceMeters) ?: return
+
+    val segmentId = "${currSegment.path.id}:${currSegment.segmentIndex}"
+    if (!walkedSegmentIds.add(segmentId)) return
+
+    val segStart = currSegment.path.points[currSegment.segmentIndex]
+    val segEnd = currSegment.path.points[currSegment.segmentIndex + 1]
+
     val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
         color = AndroidGraphicFactory.INSTANCE.createColor(255, 255, 165, 0)
         strokeWidth = 8f
         setStyle(org.mapsforge.core.graphics.Style.STROKE)
     }
 
-    for (path in paths) {
-        val polyline = Polyline(paint, AndroidGraphicFactory.INSTANCE)
-
-        for (point in path.points) {
-            polyline.latLongs.add(point)
-        }
-
-        mapView.layerManager.layers.add(polyline)
+    val polyline = Polyline(paint, AndroidGraphicFactory.INSTANCE).apply {
+        latLongs.add(segStart)
+        latLongs.add(segEnd)
     }
 
+    mapView.layerManager.layers.add(polyline)
     mapView.layerManager.redrawLayers()
 }
 
+
+
+/* REMOVE OVERLAYS: CURRENTLY ONLY THE DOTS */
 fun removeRouteLayers(mapView: MapView){
     val layers = mapView.layerManager.layers
     val toRemove = mutableListOf<Layer>()
@@ -199,4 +179,79 @@ fun removeRouteLayers(mapView: MapView){
     for(layer in toRemove){
         layers.remove(layer)
     }
+}
+
+fun removeWalkedRoutes(mapView: MapView){
+    val layers = mapView.layerManager.layers
+    val toRemove = mutableListOf<Layer>()
+
+    for(layer in layers){
+        if(layer is Marker || layer is Polyline){
+            toRemove.add(layer)
+        }
+    }
+
+    for(layer in toRemove){
+        layers.remove(layer)
+    }
+}
+
+
+
+/* HELPER FUNCTIONS */
+fun copyAssetToInternalStorage(context: Context, assetName: String): String {
+    """ Copies a file into the device's internal storage """
+
+    // Create the file/directory
+    val outFile = File(context.filesDir, assetName)
+
+    // Copy the file over
+    if (!outFile.exists() || outFile.length() == 0L) {
+        context.assets.open(assetName).use { input ->
+            outFile.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
+    // Return the copied file
+    return outFile.absolutePath
+}
+
+fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    """ Stores and returns the distance in meters between point 1 (lat1, lon1) and point 2 (lat2, lon2) in result """
+
+    val result = FloatArray(1)
+    Location.distanceBetween(lat1,lon1,lat2,lon2,result)
+
+    return result[0].toDouble()
+}
+
+fun distancePointToSegmentSquared(
+    px: Double,
+    py: Double,
+    ax: Double,
+    ay: Double,
+    bx: Double,
+    by: Double
+): Double {
+    val abx = bx - ax
+    val aby = by - ay
+    val apx = px - ax
+    val apy = py - ay
+
+    val abLenSq = abx * abx + aby * aby
+    if (abLenSq == 0.0) {
+        val dx = px - ax
+        val dy = py - ay
+        return dx * dx + dy * dy
+    }
+
+    val t = ((apx * abx + apy * aby) / abLenSq).coerceIn(0.0, 1.0)
+
+    val closestX = ax + t * abx
+    val closestY = ay + t * aby
+
+    val dx = px - closestX
+    val dy = py - closestY
+
+    return dx * dx + dy * dy
 }
