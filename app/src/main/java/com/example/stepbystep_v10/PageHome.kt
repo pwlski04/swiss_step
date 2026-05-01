@@ -32,8 +32,6 @@ import androidx.compose.material3.Surface
 
 
 /* TODO:
-- only track location when button was pressed
-- background tracking
 - track whether someone is walking or running vs using transportation (biking vs faster) in different colors/filterable
 
 EXTRA TODO:
@@ -49,7 +47,6 @@ fun Page_Home() {
     var themeFilePath by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var hasLocationPermission by remember { mutableStateOf(false) }
-    var isTracking by remember { mutableStateOf(false) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
 
     val walkedSegmentIds = remember { loadWalkedSegmentIds(context) }
@@ -65,7 +62,8 @@ fun Page_Home() {
         )
     }
 
-    var currentSessionId by remember { mutableStateOf(System.currentTimeMillis()) }
+    var isTracking by remember { mutableStateOf(loadIsTracking(context)) }      //var isTracking by remember { mutableStateOf(false) }
+    var currentSessionId by remember { mutableStateOf(loadTrackingSessionId(context)) }     //var currentSessionId by remember { mutableStateOf(System.currentTimeMillis()) }
 
     /* For the tracker */
     val currentSessionIdState by rememberUpdatedState(currentSessionId)
@@ -228,11 +226,11 @@ fun Page_Home() {
                                 val newSessionId = System.currentTimeMillis()
                                 currentSessionId = newSessionId
 
-                                tracker.start()
+                                LocationTrackingService.start(context, currentSessionId) //tracker.start()
                                 isTracking = true
                                 Log.d("StepByStep_v1.0_TAG", "Tracking started")
                             } else {
-                                tracker.stop()
+                                LocationTrackingService.stop(context) //tracker.stop()
                                 isTracking = false
                                 Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
                             }
