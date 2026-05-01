@@ -2,6 +2,7 @@ package com.example.stepbystep_v10
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -54,7 +55,6 @@ fun Page_Home() {
     val walkedSegmentIds = remember { loadWalkedSegmentIds(context) }
     var allPaths by remember { mutableStateOf<List<Path>>(emptyList()) }
     val projector = remember { LocalProjector(originLat = 47.3769) }
-    var savedWalkedRoutesDrawn by remember { mutableStateOf(false) }
 
     val segmentIndex = remember(allPaths) {
         if (allPaths.isEmpty()) null
@@ -66,6 +66,13 @@ fun Page_Home() {
     }
 
     var currentSessionId by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    /* For the tracker */
+    val currentSessionIdState by rememberUpdatedState(currentSessionId)
+    val segmentIndexState by rememberUpdatedState(segmentIndex)
+    val mapViewState by rememberUpdatedState(mapView)
+
+
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -124,26 +131,21 @@ fun Page_Home() {
     }
 
 
-    val tracker = remember(currentSessionId, segmentIndex) {
+    /* Location tracker */
+    val tracker = remember {
         LocationTracker(context) { location ->
             scope.launch {
-                val point = PathPoint(
-                    lat = location.latitude,
-                    lon = location.longitude,
-                    timestamp = System.currentTimeMillis(),
-                    sessionId = currentSessionId
-                )
+                val sessionId = currentSessionIdState
+
+                val point = PathPoint(lat = location.latitude, lon = location.longitude, timestamp = System.currentTimeMillis(), sessionId = currentSessionId)
 
                 PathFunctions.addPoint(point)
 
                 val sessionPoints = PathFunctions.getAllPoints()
-                    .filter { it.sessionId == currentSessionId }
+                    .filter { it.sessionId == sessionId }
 
-                mapView?.let { mv ->
-                    val index = segmentIndex
-                    if (index != null) {
-                        addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegmentIds, index)
-                    }
+                mapViewState?.let { mv ->
+                    addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegmentIds, segmentIndexState)
 
                     mv.setCenter(LatLong(location.latitude, location.longitude))
                     mv.layerManager.redrawLayers()
@@ -152,6 +154,15 @@ fun Page_Home() {
         }
     }
 
+    DisposableEffect(tracker) {
+        onDispose {
+            tracker.stop()
+            Log.d("StepByStep_v1.0_TAG", "Tracker stopped on dispose")
+        }
+    }
+
+
+    /* FRONTEND */
     Column(modifier = Modifier.fillMaxSize()) {
         when {
             errorMessage != null -> Text("Map load error: $errorMessage")
@@ -219,9 +230,11 @@ fun Page_Home() {
 
                                 tracker.start()
                                 isTracking = true
+                                Log.d("StepByStep_v1.0_TAG", "Tracking started")
                             } else {
                                 tracker.stop()
                                 isTracking = false
+                                Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
                             }
                         },
                         shape = RoundedCornerShape(18.dp),
