@@ -29,6 +29,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 
+
+/* TODO:
+- only track location when button was pressed
+- background tracking
+- track whether someone is walking or running vs using transportation (biking vs faster) in different colors/filterable
+
+EXTRA TODO:
+- save paths under a name when resetting to reuse later
+
+ */
 @Composable
 fun Page_Home() {
     val context = LocalContext.current
@@ -41,9 +51,10 @@ fun Page_Home() {
     var isTracking by remember { mutableStateOf(false) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
 
-    val walkedSegmentIds = remember { mutableSetOf<String>() }
+    val walkedSegmentIds = remember { loadWalkedSegmentIds(context) }
     var allPaths by remember { mutableStateOf<List<Path>>(emptyList()) }
     val projector = remember { LocalProjector(originLat = 47.3769) }
+    var savedWalkedRoutesDrawn by remember { mutableStateOf(false) }
 
     val segmentIndex = remember(allPaths) {
         if (allPaths.isEmpty()) null
@@ -100,6 +111,18 @@ fun Page_Home() {
         }
     }
 
+    LaunchedEffect(mapView, allPaths) {
+        val mv = mapView
+
+        if (mv != null && allPaths.isNotEmpty() && walkedSegmentIds.isNotEmpty()) {
+            drawWalkedSegments(
+                mapView = mv,
+                allPaths = allPaths,
+                walkedSegmentIds = walkedSegmentIds
+            )
+        }
+    }
+
 
     val tracker = remember(currentSessionId, segmentIndex) {
         LocationTracker(context) { location ->
@@ -151,6 +174,9 @@ fun Page_Home() {
                         themeFilePath = themeFilePath!!,
                         onMapReady = { readyMapView: MapView ->
                             mapView = readyMapView
+                            if (allPaths.isNotEmpty()) {
+                                drawWalkedSegments(readyMapView, allPaths, walkedSegmentIds)
+                            }
 
                             val sessionPoints = PathFunctions.getAllPoints()
                                 .filter { it.sessionId == currentSessionId }
@@ -216,8 +242,11 @@ fun Page_Home() {
                         Surface(
                             //BUTTON: REMOVE HISTORY
                             onClick = {
-                                mapView?.let { removeWalkedRoutes(it) }
-                                walkedSegmentIds.clear() },
+                                mapView?.let {
+                                    removeWalkedRoutes(it) }
+                                    walkedSegmentIds.clear()
+                                    clearWalkedSegmentIds(context)
+                                },
                             shape = RoundedCornerShape(18.dp),
                             tonalElevation = 6.dp,
                             shadowElevation = 8.dp,

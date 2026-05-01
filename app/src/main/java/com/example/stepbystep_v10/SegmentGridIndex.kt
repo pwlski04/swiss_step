@@ -7,6 +7,10 @@ class SegmentGridIndex(
 ) {
     private val grid = HashMap<Pair<Int, Int>, MutableList<IndexedSegment>>()
 
+    private fun cell(value: Double): Int {
+        return kotlin.math.floor(value / cellSizeMeters).toInt()
+    }
+
     init {
         for (path in paths) {
             for (i in 0 until path.points.size - 1) {
@@ -83,9 +87,5 @@ class SegmentGridIndex(
                 distanceMeters = kotlin.math.sqrt(bestDistanceSquared)
             )
         }
-    }
-
-    private fun cell(value: Double): Int {
-        return kotlin.math.floor(value / cellSizeMeters).toInt()
     }
 }

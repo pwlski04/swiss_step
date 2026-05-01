@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
 import android.os.Looper
+import android.util.Log
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -40,7 +41,10 @@ class LocationTracker(context: Context, private val onLocation: (Location) -> Un
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+            Log.d("StepByStep_v1.0_TAG", "Location update count: ${result.locations.size}")
+
             for (location in result.locations) {
+                Log.d("StepByStep_v1.0_TAG", "Location: ${location.latitude}, ${location.longitude}")
                 onLocation(location)
             }
         }

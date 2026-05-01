@@ -16,7 +16,6 @@ import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 import org.mapsforge.map.layer.Layer
 import org.mapsforge.map.layer.overlay.Polyline
 
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint as AndroidPaint
 import org.mapsforge.core.graphics.Bitmap as MapsforgeBitmap
@@ -124,6 +123,7 @@ fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPo
 
     segmentIndex?.let { index ->
         addPathIfNeeded(
+            context,
             mapView,
             latestPoint,
             walkedSegmentIds,
@@ -136,14 +136,14 @@ fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPo
     mapView.layerManager.redrawLayers()
 }
 
-
-
 /* OVERLAY PATHS: DISPLAY WALKED PATHS */
-fun addPathIfNeeded(mapView: MapView, point: PathPoint, walkedSegmentIds: MutableSet<String>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double) {
+fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walkedSegmentIds: MutableSet<String>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double) {
     val currSegment = segmentIndex.findClosest(point, maxDistanceMeters) ?: return
 
     val segmentId = "${currSegment.path.id}:${currSegment.segmentIndex}"
+
     if (!walkedSegmentIds.add(segmentId)) return
+    saveWalkedSegmentIds(context, walkedSegmentIds)
 
     val segStart = currSegment.path.points[currSegment.segmentIndex]
     val segEnd = currSegment.path.points[currSegment.segmentIndex + 1]
@@ -160,6 +160,34 @@ fun addPathIfNeeded(mapView: MapView, point: PathPoint, walkedSegmentIds: Mutabl
     }
 
     mapView.layerManager.layers.add(polyline)
+    mapView.layerManager.redrawLayers()
+}
+
+fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegmentIds: Set<String>) {
+    var drawnCount = 0
+
+    val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+        color = AndroidGraphicFactory.INSTANCE.createColor(255, 255, 165, 0)
+        strokeWidth = 8f
+        setStyle(org.mapsforge.core.graphics.Style.STROKE)
+    }
+
+    for (path in allPaths) {
+        for (i in 0 until path.points.size - 1) {
+            val segmentId = "${path.id}:$i"
+
+            if (segmentId in walkedSegmentIds) {
+                val polyline = Polyline(paint, AndroidGraphicFactory.INSTANCE).apply {
+                    latLongs.add(path.points[i])
+                    latLongs.add(path.points[i + 1])
+                }
+
+                mapView.layerManager.layers.add(polyline)
+                drawnCount++
+            }
+        }
+    }
+
     mapView.layerManager.redrawLayers()
 }
 
