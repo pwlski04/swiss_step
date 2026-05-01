@@ -32,11 +32,13 @@ import androidx.compose.material3.Surface
 
 
 /* TODO:
-- track whether someone is walking or running vs using transportation (biking vs faster) in different colors/filterable
+- prevent scrolling/zooming outside of map boundaries
 
 EXTRA TODO:
+- center current position
 - save paths under a name when resetting to reuse later
-
+- clean up code (split up into files/directories)
+- add good documentation
  */
 @Composable
 fun Page_Home() {
@@ -49,7 +51,7 @@ fun Page_Home() {
     var hasLocationPermission by remember { mutableStateOf(false) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
 
-    val walkedSegmentIds = remember { loadWalkedSegmentIds(context) }
+    val walkedSegments: MutableMap<String, MovementType> = remember { loadWalkedSegments(context) }
     var allPaths by remember { mutableStateOf<List<Path>>(emptyList()) }
     val projector = remember { LocalProjector(originLat = 47.3769) }
 
@@ -65,11 +67,10 @@ fun Page_Home() {
     var isTracking by remember { mutableStateOf(loadIsTracking(context)) }      //var isTracking by remember { mutableStateOf(false) }
     var currentSessionId by remember { mutableStateOf(loadTrackingSessionId(context)) }     //var currentSessionId by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    /* For the tracker */
-    val currentSessionIdState by rememberUpdatedState(currentSessionId)
-    val segmentIndexState by rememberUpdatedState(segmentIndex)
-    val mapViewState by rememberUpdatedState(mapView)
+    var currentMovementType by remember { mutableStateOf(loadCurrentMovementType(context)) }
 
+    val latestLivePoint = TrackingLiveState.latestPoint.value
+    val liveMovementType = TrackingLiveState.movementType.value
 
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -77,6 +78,8 @@ fun Page_Home() {
     ) { granted ->
         hasLocationPermission = granted
     }
+
+
 
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(
@@ -119,43 +122,25 @@ fun Page_Home() {
     LaunchedEffect(mapView, allPaths) {
         val mv = mapView
 
-        if (mv != null && allPaths.isNotEmpty() && walkedSegmentIds.isNotEmpty()) {
-            drawWalkedSegments(
-                mapView = mv,
-                allPaths = allPaths,
-                walkedSegmentIds = walkedSegmentIds
-            )
+        if (mv != null && allPaths.isNotEmpty() && walkedSegments.isNotEmpty()) {
+            drawWalkedSegments(mv, allPaths, walkedSegments)
         }
     }
 
+    LaunchedEffect(latestLivePoint, mapView, segmentIndex) {
+        val point = latestLivePoint
+        val mv = mapView
 
-    /* Location tracker */
-    val tracker = remember {
-        LocationTracker(context) { location ->
-            scope.launch {
-                val sessionId = currentSessionIdState
+        if (point != null && mv != null) {
+            currentMovementType = liveMovementType
 
-                val point = PathPoint(lat = location.latitude, lon = location.longitude, timestamp = System.currentTimeMillis(), sessionId = currentSessionId)
+            val sessionPoints = PathFunctions.getAllPoints()
+                .filter { it.sessionId == point.sessionId }
 
-                PathFunctions.addPoint(point)
+            addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegments, segmentIndex, liveMovementType)
 
-                val sessionPoints = PathFunctions.getAllPoints()
-                    .filter { it.sessionId == sessionId }
-
-                mapViewState?.let { mv ->
-                    addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegmentIds, segmentIndexState)
-
-                    mv.setCenter(LatLong(location.latitude, location.longitude))
-                    mv.layerManager.redrawLayers()
-                }
-            }
-        }
-    }
-
-    DisposableEffect(tracker) {
-        onDispose {
-            tracker.stop()
-            Log.d("StepByStep_v1.0_TAG", "Tracker stopped on dispose")
+            mv.setCenter(LatLong(point.lat, point.lon))
+            mv.layerManager.redrawLayers()
         }
     }
 
@@ -184,14 +169,8 @@ fun Page_Home() {
                         onMapReady = { readyMapView: MapView ->
                             mapView = readyMapView
                             if (allPaths.isNotEmpty()) {
-                                drawWalkedSegments(readyMapView, allPaths, walkedSegmentIds)
+                                drawWalkedSegments(readyMapView, allPaths, walkedSegments)
                             }
-
-                            val sessionPoints = PathFunctions.getAllPoints()
-                                .filter { it.sessionId == currentSessionId }
-
-                            val index = segmentIndex
-                            addLatestDotIfNeeded(context, readyMapView, sessionPoints, walkedSegmentIds, index)
                             readyMapView.layerManager.redrawLayers()
                         }
                     )
@@ -205,7 +184,8 @@ fun Page_Home() {
                         .align(Alignment.TopCenter)
                         .padding(top = 16.dp)
                 ){
-                    Text("Hello World", modifier = Modifier
+                    Text(text = liveMovementType.name,
+                        modifier = Modifier
                         .width(160.dp)
                         .padding(top = 16.dp, bottom = 16.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -226,7 +206,7 @@ fun Page_Home() {
                                 val newSessionId = System.currentTimeMillis()
                                 currentSessionId = newSessionId
 
-                                LocationTrackingService.start(context, currentSessionId) //tracker.start()
+                                LocationTrackingService.start(context, newSessionId) //tracker.start()
                                 isTracking = true
                                 Log.d("StepByStep_v1.0_TAG", "Tracking started")
                             } else {
@@ -255,8 +235,8 @@ fun Page_Home() {
                             onClick = {
                                 mapView?.let {
                                     removeWalkedRoutes(it) }
-                                    walkedSegmentIds.clear()
-                                    clearWalkedSegmentIds(context)
+                                    walkedSegments.clear()
+                                    clearWalkedSegments(context)
                                 },
                             shape = RoundedCornerShape(18.dp),
                             tonalElevation = 6.dp,
@@ -279,7 +259,7 @@ fun Page_Home() {
                     Surface(
                         onClick = { mapView?.let { mv ->
                             val currentZoom = mv.model.mapViewPosition.zoomLevel
-                            mv.setZoomLevel((currentZoom + 1).toByte())
+                            mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
                         }},
                         shape = RoundedCornerShape(18.dp),
                         tonalElevation = 6.dp,
@@ -297,7 +277,7 @@ fun Page_Home() {
                     Surface(
                         onClick = { mapView?.let { mv ->
                             val currentZoom = mv.model.mapViewPosition.zoomLevel
-                            mv.setZoomLevel((currentZoom - 1).toByte())
+                            mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
                         }},
                         shape = RoundedCornerShape(18.dp),
                         tonalElevation = 6.dp,

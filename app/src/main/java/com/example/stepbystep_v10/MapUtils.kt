@@ -25,6 +25,9 @@ import android.location.Location
 import androidx.core.graphics.createBitmap
 
 
+private val drawnSegmentLayers = mutableMapOf<String, Polyline>()
+
+
 
 /* CREATE MAP: */
 fun createMapView(context: Context, mapFilePath: String, themeFilePath: String): MapView {
@@ -92,7 +95,7 @@ fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: I
     return AndroidGraphicFactory.convertToBitmap(BitmapDrawable(androidBitmap))
 }
 
-fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>, walkedSegmentIds: MutableSet<String>, segmentIndex: SegmentGridIndex?) {
+fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType) {
     if (points.isEmpty()) return
 
     val latestPoint = points.last()
@@ -126,9 +129,10 @@ fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPo
             context,
             mapView,
             latestPoint,
-            walkedSegmentIds,
+            walkedSegments,
             segmentIndex,
-            maxDistanceMeters = 3.0
+            maxDistanceMeters = 3.0,
+            movementType
         )
     }
 
@@ -137,19 +141,81 @@ fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPo
 }
 
 /* OVERLAY PATHS: DISPLAY WALKED PATHS */
-fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walkedSegmentIds: MutableSet<String>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double) {
+fun colorForMovementType(type: MovementType): Int {
+    return when (type) {
+        MovementType.STILL ->
+            AndroidGraphicFactory.INSTANCE.createColor(255, 180, 180, 180)
+
+        MovementType.WALKING ->
+            AndroidGraphicFactory.INSTANCE.createColor(255, 255, 165, 0) // orange
+
+        MovementType.RUNNING ->
+            AndroidGraphicFactory.INSTANCE.createColor(255, 255, 0, 0) // red
+
+        MovementType.BIKING ->
+            AndroidGraphicFactory.INSTANCE.createColor(255, 0, 150, 255) // blue
+
+        MovementType.TRANSPORT ->
+            AndroidGraphicFactory.INSTANCE.createColor(255, 120, 120, 120) // gray
+    }
+}
+
+fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double, movementType: MovementType) {
     val currSegment = segmentIndex.findClosest(point, maxDistanceMeters) ?: return
 
     val segmentId = "${currSegment.path.id}:${currSegment.segmentIndex}"
 
-    if (!walkedSegmentIds.add(segmentId)) return
-    saveWalkedSegmentIds(context, walkedSegmentIds)
+    val oldMovementType = walkedSegments[segmentId]
+
+    if (oldMovementType != null) {
+        val newTypeIsSlower = isSlowerThanOrEqual(movementType, oldMovementType)
+
+        if (!newTypeIsSlower) {
+            return
+        }
+    }
+
+    walkedSegments[segmentId] = movementType
+    saveWalkedSegments(context, walkedSegments)
 
     val segStart = currSegment.path.points[currSegment.segmentIndex]
     val segEnd = currSegment.path.points[currSegment.segmentIndex + 1]
 
+    drawOrReplaceSegment(mapView, segmentId, segStart, segEnd, movementType)
+    mapView.layerManager.redrawLayers()
+}
+
+fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegments: Map<String, MovementType>) {
+    drawnSegmentLayers.clear()
+
+    for (path in allPaths) {
+        for (i in 0 until path.points.size - 1) {
+            val segmentId = "${path.id}:$i"
+            val movementType = walkedSegments[segmentId] ?: continue
+
+            drawOrReplaceSegment(mapView, segmentId, path.points[i], path.points[i + 1], movementType)
+        }
+    }
+
+    mapView.layerManager.redrawLayers()
+}
+
+
+fun drawOrReplaceSegment(
+    mapView: MapView,
+    segmentId: String,
+    segStart: LatLong,
+    segEnd: LatLong,
+    movementType: MovementType
+) {
+    val oldLayer = drawnSegmentLayers[segmentId]
+
+    if (oldLayer != null) {
+        mapView.layerManager.layers.remove(oldLayer)
+    }
+
     val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-        color = AndroidGraphicFactory.INSTANCE.createColor(255, 255, 165, 0)
+        color = colorForMovementType(movementType)
         strokeWidth = 8f
         setStyle(org.mapsforge.core.graphics.Style.STROKE)
     }
@@ -159,36 +225,8 @@ fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walked
         latLongs.add(segEnd)
     }
 
+    drawnSegmentLayers[segmentId] = polyline
     mapView.layerManager.layers.add(polyline)
-    mapView.layerManager.redrawLayers()
-}
-
-fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegmentIds: Set<String>) {
-    var drawnCount = 0
-
-    val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-        color = AndroidGraphicFactory.INSTANCE.createColor(255, 255, 165, 0)
-        strokeWidth = 8f
-        setStyle(org.mapsforge.core.graphics.Style.STROKE)
-    }
-
-    for (path in allPaths) {
-        for (i in 0 until path.points.size - 1) {
-            val segmentId = "${path.id}:$i"
-
-            if (segmentId in walkedSegmentIds) {
-                val polyline = Polyline(paint, AndroidGraphicFactory.INSTANCE).apply {
-                    latLongs.add(path.points[i])
-                    latLongs.add(path.points[i + 1])
-                }
-
-                mapView.layerManager.layers.add(polyline)
-                drawnCount++
-            }
-        }
-    }
-
-    mapView.layerManager.redrawLayers()
 }
 
 
@@ -211,17 +249,18 @@ fun removeRouteLayers(mapView: MapView){
 
 fun removeWalkedRoutes(mapView: MapView){
     val layers = mapView.layerManager.layers
-    val toRemove = mutableListOf<Layer>()
 
-    for(layer in layers){
-        if(layer is Marker || layer is Polyline){
-            toRemove.add(layer)
-        }
+    val toRemove = layers.filter { layer ->
+        layer is Marker || layer is Polyline
     }
 
-    for(layer in toRemove){
+    toRemove.forEach { layer ->
         layers.remove(layer)
     }
+
+    drawnSegmentLayers.clear()
+
+    mapView.layerManager.redrawLayers()
 }
 
 

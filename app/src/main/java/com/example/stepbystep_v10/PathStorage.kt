@@ -2,7 +2,7 @@ package com.example.stepbystep_v10
 
 import android.content.Context
 import android.util.Log
-import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 
@@ -10,52 +10,57 @@ import java.io.File
 private const val WALKED_SEGMENTS_FILE = "walked_segments.json"
 
 
-fun saveWalkedSegmentIds(context: Context, walkedSegmentIds: Set<String>){
+fun saveWalkedSegments(context: Context, walkedSegments: Map<String, MovementType>){
     try {
-        val jsonArray = JSONArray()
+        val jsonObject = JSONObject()
 
-        walkedSegmentIds.forEach { id ->
-            jsonArray.put(id)
+        walkedSegments.forEach { (segmentId, movementType) ->
+            jsonObject.put(segmentId, movementType.name)
         }
 
         val file = File(context.filesDir, WALKED_SEGMENTS_FILE)
-        file.writeText(jsonArray.toString())
+        file.writeText(jsonObject.toString())
     }catch (e: Exception) {
         Log.e("StepByStep_v1.0_TAG", "Failed to save segment IDs", e)
     }
 }
 
 
-fun loadWalkedSegmentIds(context: Context): MutableSet<String>{
+fun loadWalkedSegments(context: Context): MutableMap<String, MovementType>{
     return try {
         val file = File(context.filesDir, WALKED_SEGMENTS_FILE)
 
         if(!file.exists()){
-            return mutableSetOf()
+            return mutableMapOf()
         }
 
         val jsonText = file.readText()
         if(jsonText.isBlank()){
-            return mutableSetOf()
+            return mutableMapOf()
         }
 
-        val jsonArray = JSONArray(jsonText)
-        val ids = mutableSetOf<String>()
+        val jsonObject = JSONObject(jsonText)
+        val result = mutableMapOf<String, MovementType>()
 
-        for(i in 0 until jsonArray.length()){
-            ids.add(jsonArray.getString(i))
+        val keys = jsonObject.keys()
+
+        while (keys.hasNext()) {
+            val segmentId = keys.next()
+            val movementName = jsonObject.getString(segmentId)
+
+            result[segmentId] = MovementType.valueOf(movementName)
         }
 
-        ids
+        result
     } catch (e: Exception) {
         Log.e("StepByStep_v1.0_TAG", "Failed to load segment IDs", e)
 
-        mutableSetOf()
+        mutableMapOf()
     }
 }
 
 
-fun clearWalkedSegmentIds(context: Context){
+fun clearWalkedSegments(context: Context){
     try {
         val file = File(context.filesDir, WALKED_SEGMENTS_FILE)
         if (file.exists()){

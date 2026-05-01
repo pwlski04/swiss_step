@@ -18,16 +18,41 @@ import androidx.core.app.NotificationCompat
 import android.content.pm.ServiceInfo
 import android.util.Log
 import com.google.android.gms.location.*
+import androidx.core.content.edit
+
+private const val MOVEMENT_PREFS_NAME = "movement_state"
+private const val KEY_CURRENT_MOVEMENT_TYPE = "current_movement_type"
+
+fun saveCurrentMovementType(context: Context, movementType: MovementType) {
+    context.getSharedPreferences(MOVEMENT_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit {
+            putString(KEY_CURRENT_MOVEMENT_TYPE, movementType.name)
+        }
+}
+
+fun loadCurrentMovementType(context: Context): MovementType {
+    val name = context.getSharedPreferences(MOVEMENT_PREFS_NAME, Context.MODE_PRIVATE)
+        .getString(KEY_CURRENT_MOVEMENT_TYPE, MovementType.STILL.name)
+
+    return try {
+        MovementType.valueOf(name ?: MovementType.STILL.name)
+    } catch (e: Exception) {
+        MovementType.STILL
+    }
+}
 
 class LocationTrackingService: Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var sessionId: Long = 0L
+    private val movementClassifier = MovementClassifier()
+
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
     }
+
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         sessionId = intent?.getLongExtra(EXTRA_SESSION_ID, loadTrackingSessionId(this))
@@ -60,10 +85,12 @@ class LocationTrackingService: Service() {
         return START_STICKY
     }
 
+
     override fun onDestroy() {
         stopLocationUpdates()
         super.onDestroy()
     }
+
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -88,20 +115,20 @@ class LocationTrackingService: Service() {
     }
 
     private fun handleLocation(location: Location) {
-        val point = PathPoint(
-            lat = location.latitude,
-            lon = location.longitude,
-            timestamp = System.currentTimeMillis(),
-            sessionId = sessionId
-        )
+        val movementType = movementClassifier.classify(location)
+        saveCurrentMovementType(this, movementType)
+
+        val point = PathPoint(location.latitude, location.longitude, System.currentTimeMillis(), sessionId)
 
         PathFunctions.addPoint(point)
 
-        /*
-         * Important:
-         * If you want points to survive app restarts too,
-         * PathFunctions.addPoint(...) must also write to local storage/database.
-         */
+        TrackingLiveState.latestPoint.value = point
+        TrackingLiveState.movementType.value = movementType
+
+        Log.d(
+            "StepByStep_v1.0_TAG",
+            "Service location: ${location.latitude}, ${location.longitude}, movement=$movementType, session=$sessionId"
+        )
     }
 
     private fun startLocationUpdates() {
