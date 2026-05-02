@@ -14,9 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.mapsforge.core.model.LatLong
 import org.mapsforge.map.android.view.MapView
 
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,24 +24,35 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import org.mapsforge.core.model.LatLong
 
-/* TODO:
-- prevent scrolling/zooming outside of map boundaries
 
-EXTRA TODO:
-- center current position
-- save paths under a name when resetting to reuse later
-- clean up code (split up into files/directories)
-- add good documentation
+/*
+TODO:
+- experience
+    - fix paths to match perfectly over the gray template
+    - save paths under a name when resetting to reuse later
+    - improve map boundaries
+    - more cities
+- code
+    - make object-oriented
+    - clean up code (split up into files/directories)
+    - add good documentation
  */
+
 @Composable
 fun Page_Home() {
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     var mapFilePath by remember { mutableStateOf<String?>(null) }
     var themeFilePath by remember { mutableStateOf<String?>(null) }
@@ -65,13 +74,11 @@ fun Page_Home() {
     }
 
     var isTracking by remember { mutableStateOf(loadIsTracking(context)) }      //var isTracking by remember { mutableStateOf(false) }
-    var currentSessionId by remember { mutableStateOf(loadTrackingSessionId(context)) }     //var currentSessionId by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    var currentMovementType by remember { mutableStateOf(loadCurrentMovementType(context)) }
+    val locationMarker = remember { LocationMarker() }
 
     val latestLivePoint = TrackingLiveState.latestPoint.value
     val liveMovementType = TrackingLiveState.movementType.value
-
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -80,6 +87,15 @@ fun Page_Home() {
     }
 
 
+    LaunchedEffect(mapView) {
+        while (mapView != null) {
+            mapView?.let { mv ->
+                applySmoothMapForceField(mv)
+            }
+
+            kotlinx.coroutines.delay(16L)
+        }
+    }
 
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(
@@ -119,6 +135,55 @@ fun Page_Home() {
         }
     }
 
+    DisposableEffect(lifecycleOwner, isTracking) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (!isTracking) return@LifecycleEventObserver
+
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    LocationTrackingService.useForegroundUpdates(context)
+                    Log.d("StepByStep_v1.0_TAG", "Using foreground location updates")
+
+                    val mv = mapView
+
+                    if (mv != null) {
+                        val allPoints = PathFunctions.getAllPoints()
+
+                        val latestSessionId = allPoints.lastOrNull()?.sessionId
+
+                        if (latestSessionId != null) {
+                            val sessionPoints = allPoints
+                                .filter { it.sessionId == latestSessionId }
+
+                            drawSessionDotsAndPaths(context, mv, sessionPoints, walkedSegments, segmentIndex, TrackingLiveState.movementType.value)
+                        }
+                    }
+                }
+
+                Lifecycle.Event.ON_STOP -> {
+                    LocationTrackingService.useBackgroundUpdates(context)
+                    Log.d("StepByStep_v1.0_TAG", "Using background location updates")
+                }
+
+                else -> Unit
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(isTracking, mapView) {
+        if (!isTracking) {
+            mapView?.let { mv ->
+                locationMarker.hide(mv)
+            }
+        }
+    }
+
     LaunchedEffect(mapView, allPaths) {
         val mv = mapView
 
@@ -132,14 +197,14 @@ fun Page_Home() {
         val mv = mapView
 
         if (point != null && mv != null) {
-            currentMovementType = liveMovementType
+            locationMarker.update(mv, point.lat, point.lon, isTracking)
 
             val sessionPoints = PathFunctions.getAllPoints()
                 .filter { it.sessionId == point.sessionId }
 
             addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegments, segmentIndex, liveMovementType)
 
-            mv.setCenter(LatLong(point.lat, point.lon))
+            //mv.setCenter(LatLong(point.lat, point.lon))
             mv.layerManager.redrawLayers()
         }
     }
@@ -182,7 +247,7 @@ fun Page_Home() {
                     shadowElevation = 8.dp,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 16.dp)
+                        .padding(top = 8.dp)
                 ){
                     Text(text = liveMovementType.name,
                         modifier = Modifier
@@ -204,7 +269,6 @@ fun Page_Home() {
 
                             if (!isTracking) {
                                 val newSessionId = System.currentTimeMillis()
-                                currentSessionId = newSessionId
 
                                 LocationTrackingService.start(context, newSessionId) //tracker.start()
                                 isTracking = true
@@ -219,7 +283,7 @@ fun Page_Home() {
                         tonalElevation = 6.dp,
                         shadowElevation = 8.dp,
                         modifier = Modifier
-                            .padding(top = 16.dp, end = 16.dp)
+                            .padding(top = 8.dp, end = 12.dp)
                     ) {
                         Icon(
                             imageVector = if (isTracking) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -233,16 +297,25 @@ fun Page_Home() {
                         Surface(
                             //BUTTON: REMOVE HISTORY
                             onClick = {
-                                mapView?.let {
-                                    removeWalkedRoutes(it) }
-                                    walkedSegments.clear()
-                                    clearWalkedSegments(context)
-                                },
+                                walkedSegments.clear()
+                                clearWalkedSegments(context)
+
+                                PathFunctions.clear()
+
+                                TrackingLiveState.latestPoint.value = null
+                                TrackingLiveState.movementType.value = MovementType.STILL
+
+                                mapView?.let { mv ->
+                                    locationMarker.hide(mv)
+                                    removeWalkedRoutes(mv)
+                                    mv.layerManager.redrawLayers()
+                                }
+                            },
                             shape = RoundedCornerShape(18.dp),
                             tonalElevation = 6.dp,
                             shadowElevation = 8.dp,
                             modifier = Modifier
-                                .padding(top = 16.dp, end = 16.dp)
+                                .padding(top = 12.dp, end = 12.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.DeleteOutline,
@@ -254,7 +327,39 @@ fun Page_Home() {
                 }
 
 
-                Column (modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 12.dp, start = 12.dp)){
+                Column (modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 16.dp, start = 12.dp)){
+                    val point = latestLivePoint
+
+                    Surface(
+                        //BUTTON: RECENTER MAP
+                        onClick = {
+                            val mv = mapView
+                            val p = point
+
+                            if (mv != null && p != null) {
+                                mv.setZoomLevel(18)
+                                mv.setCenter(
+                                    LatLong(
+                                        p.lat,
+                                        p.lon
+                                    )
+                                )
+
+                                mv.layerManager.redrawLayers()
+                            }
+                        },
+                        shape = RoundedCornerShape(18.dp),
+                        tonalElevation = 6.dp,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier.padding(4.dp, bottom = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.MyLocation,
+                            contentDescription = "Recenter map",
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+
                     //BUTTON: ZOOM IN
                     Surface(
                         onClick = { mapView?.let { mv ->

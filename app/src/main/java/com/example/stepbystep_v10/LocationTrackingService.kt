@@ -18,28 +18,7 @@ import androidx.core.app.NotificationCompat
 import android.content.pm.ServiceInfo
 import android.util.Log
 import com.google.android.gms.location.*
-import androidx.core.content.edit
-
-private const val MOVEMENT_PREFS_NAME = "movement_state"
-private const val KEY_CURRENT_MOVEMENT_TYPE = "current_movement_type"
-
-fun saveCurrentMovementType(context: Context, movementType: MovementType) {
-    context.getSharedPreferences(MOVEMENT_PREFS_NAME, Context.MODE_PRIVATE)
-        .edit {
-            putString(KEY_CURRENT_MOVEMENT_TYPE, movementType.name)
-        }
-}
-
-fun loadCurrentMovementType(context: Context): MovementType {
-    val name = context.getSharedPreferences(MOVEMENT_PREFS_NAME, Context.MODE_PRIVATE)
-        .getString(KEY_CURRENT_MOVEMENT_TYPE, MovementType.STILL.name)
-
-    return try {
-        MovementType.valueOf(name ?: MovementType.STILL.name)
-    } catch (e: Exception) {
-        MovementType.STILL
-    }
-}
+import androidx.core.content.ContextCompat
 
 class LocationTrackingService: Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -55,6 +34,24 @@ class LocationTrackingService: Service() {
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_FOREGROUND_UPDATES -> {
+                Log.d("StepByStep_v1.0_TAG", "Service action: foreground updates")
+                useForegroundUpdates = true
+                TrackingLiveState.isForegroundTracking.value = true
+                restartLocationUpdates()
+                return START_STICKY
+            }
+
+            ACTION_BACKGROUND_UPDATES -> {
+                Log.d("StepByStep_v1.0_TAG", "Service action: background updates")
+                useForegroundUpdates = false
+                TrackingLiveState.isForegroundTracking.value = false
+                restartLocationUpdates()
+                return START_STICKY
+            }
+        }
+
         sessionId = intent?.getLongExtra(EXTRA_SESSION_ID, loadTrackingSessionId(this))
             ?: loadTrackingSessionId(this)
 
@@ -67,7 +64,7 @@ class LocationTrackingService: Service() {
             .setOngoing(true)
             .build()
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
@@ -80,6 +77,7 @@ class LocationTrackingService: Service() {
             )
         }
 
+        useForegroundUpdates = true
         startLocationUpdates()
 
         return START_STICKY
@@ -87,6 +85,7 @@ class LocationTrackingService: Service() {
 
 
     override fun onDestroy() {
+        Log.d("StepByStep_v1.0_TAG", "LocationTrackingService destroyed")
         stopLocationUpdates()
         super.onDestroy()
     }
@@ -94,13 +93,25 @@ class LocationTrackingService: Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private val request = LocationRequest.Builder(
+    private val foregroundRequest = LocationRequest.Builder(
         Priority.PRIORITY_HIGH_ACCURACY,
-        3000L
+        1000L
     )
+        .setMinUpdateIntervalMillis(500L)
         .setMinUpdateDistanceMeters(0f)
         .setWaitForAccurateLocation(false)
         .build()
+
+    private val backgroundRequest = LocationRequest.Builder(
+        Priority.PRIORITY_HIGH_ACCURACY, //.PRIORITY_BALANCED_POWER_ACCURACY,
+        5000L
+    )
+        .setMinUpdateIntervalMillis(3000L)
+        .setMinUpdateDistanceMeters(0f)
+        .setWaitForAccurateLocation(false)
+        .build()
+
+    private var useForegroundUpdates = true
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -116,9 +127,8 @@ class LocationTrackingService: Service() {
 
     private fun handleLocation(location: Location) {
         val movementType = movementClassifier.classify(location)
-        saveCurrentMovementType(this, movementType)
 
-        val point = PathPoint(location.latitude, location.longitude, System.currentTimeMillis(), sessionId)
+        val point = PathPoint(location.latitude, location.longitude, System.currentTimeMillis(), sessionId, movementType)
 
         PathFunctions.addPoint(point)
 
@@ -137,16 +147,52 @@ class LocationTrackingService: Service() {
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
+        val backgroundGranted =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ActivityCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+
+        Log.d(
+            "StepByStep_v1.0_TAG",
+            "Permission check: fine=$fineGranted background=$backgroundGranted foreground=$useForegroundUpdates"
+        )
+
+        if (!useForegroundUpdates && !backgroundGranted) {
+            Log.d(
+                "StepByStep_v1.0_TAG",
+                "ACCESS_BACKGROUND_LOCATION=false. Service is still foreground, but background permission is not granted."
+            )
+        }
+
         if (!fineGranted) {
+            Log.d("StepByStep_v1.0_TAG", "No fine location permission. Stopping service.")
             stopSelf()
             return
         }
 
+        val activeRequest = if (useForegroundUpdates) {
+            foregroundRequest
+        } else {
+            backgroundRequest
+        }
+
         fusedLocationClient.requestLocationUpdates(
-            request,
+            activeRequest,
             callback,
             Looper.getMainLooper()
         )
+
+        Log.d("StepByStep_v1.0_TAG", "requestLocationUpdates called")
+    }
+
+    private fun restartLocationUpdates() {
+        stopLocationUpdates()
+        startLocationUpdates()
     }
 
     private fun stopLocationUpdates() {
@@ -172,6 +218,9 @@ class LocationTrackingService: Service() {
 
         const val EXTRA_SESSION_ID = "session_id"
 
+        private const val ACTION_FOREGROUND_UPDATES = "foreground_updates"
+        private const val ACTION_BACKGROUND_UPDATES = "background_updates"
+
         fun start(context: Context, sessionId: Long) {
             val intent = Intent(context, LocationTrackingService::class.java)
                 .putExtra(EXTRA_SESSION_ID, sessionId)
@@ -184,6 +233,20 @@ class LocationTrackingService: Service() {
 
             val intent = Intent(context, LocationTrackingService::class.java)
             context.stopService(intent)
+        }
+
+        fun useForegroundUpdates(context: Context) {
+            val intent = Intent(context, LocationTrackingService::class.java)
+                .setAction(ACTION_FOREGROUND_UPDATES)
+
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun useBackgroundUpdates(context: Context) {
+            val intent = Intent(context, LocationTrackingService::class.java)
+                .setAction(ACTION_BACKGROUND_UPDATES)
+
+            ContextCompat.startForegroundService(context, intent)
         }
     }
 }

@@ -13,7 +13,6 @@ import java.io.File
 import org.mapsforge.map.rendertheme.ExternalRenderTheme
 import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 
-import org.mapsforge.map.layer.Layer
 import org.mapsforge.map.layer.overlay.Polyline
 
 import android.graphics.Canvas
@@ -24,9 +23,15 @@ import android.graphics.drawable.BitmapDrawable
 import android.location.Location
 import androidx.core.graphics.createBitmap
 
-
 private val drawnSegmentLayers = mutableMapOf<String, Polyline>()
 
+private const val ZURICH_MIN_LAT = 47.32
+private const val ZURICH_MAX_LAT = 47.43
+private const val ZURICH_MIN_LON = 8.44
+private const val ZURICH_MAX_LON = 8.63
+
+private const val RUBBER_BAND_LAT = 0.0035
+private const val RUBBER_BAND_LON = 0.0055
 
 
 /* CREATE MAP: */
@@ -77,6 +82,84 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
 }
 
 
+fun applySmoothMapForceField(mapView: MapView) {
+    val center = mapView.model.mapViewPosition.center ?: return
+
+    val softMinLat = ZURICH_MIN_LAT - RUBBER_BAND_LAT
+    val softMaxLat = ZURICH_MAX_LAT + RUBBER_BAND_LAT
+    val softMinLon = ZURICH_MIN_LON - RUBBER_BAND_LON
+    val softMaxLon = ZURICH_MAX_LON + RUBBER_BAND_LON
+
+    /*
+     * Hard limit the maximum overscroll.
+     * This prevents fast swipes from flying far outside the map.
+     */
+    val limitedLat = center.latitude.coerceIn(softMinLat, softMaxLat)
+    val limitedLon = center.longitude.coerceIn(softMinLon, softMaxLon)
+
+    var targetLat = limitedLat
+    var targetLon = limitedLon
+
+    val outsideAmount = getOutsideAmount(
+        LatLong(
+            limitedLat,
+            limitedLon
+        )
+    )
+
+    /*
+     * Dynamic force:
+     * tiny outside = soft
+     * far outside = strong resistance
+     */
+    val pullStrength = when {
+        outsideAmount > 0.006 -> 0.55
+        outsideAmount > 0.003 -> 0.35
+        else -> 0.18
+    }
+
+    if (limitedLat < ZURICH_MIN_LAT) {
+        targetLat = limitedLat + (ZURICH_MIN_LAT - limitedLat) * pullStrength
+    } else if (limitedLat > ZURICH_MAX_LAT) {
+        targetLat = limitedLat - (limitedLat - ZURICH_MAX_LAT) * pullStrength
+    }
+
+    if (limitedLon < ZURICH_MIN_LON) {
+        targetLon = limitedLon + (ZURICH_MIN_LON - limitedLon) * pullStrength
+    } else if (limitedLon > ZURICH_MAX_LON) {
+        targetLon = limitedLon - (limitedLon - ZURICH_MAX_LON) * pullStrength
+    }
+
+    val needsCorrection =
+        kotlin.math.abs(targetLat - center.latitude) > 0.000003 ||
+                kotlin.math.abs(targetLon - center.longitude) > 0.000003
+
+    if (needsCorrection) {
+        mapView.setCenter(
+            LatLong(
+                targetLat,
+                targetLon
+            )
+        )
+    }
+}
+
+fun getOutsideAmount(center: LatLong): Double {
+    val latOutside = when {
+        center.latitude < ZURICH_MIN_LAT -> ZURICH_MIN_LAT - center.latitude
+        center.latitude > ZURICH_MAX_LAT -> center.latitude - ZURICH_MAX_LAT
+        else -> 0.0
+    }
+
+    val lonOutside = when {
+        center.longitude < ZURICH_MIN_LON -> ZURICH_MIN_LON - center.longitude
+        center.longitude > ZURICH_MAX_LON -> center.longitude - ZURICH_MAX_LON
+        else -> 0.0
+    }
+
+    return maxOf(latOutside, lonOutside)
+}
+
 
 /* ADD OVERLAY DOTS: EXACT LCOATION FOR POSITION TRACKING */
 fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: Int): MapsforgeBitmap {
@@ -101,28 +184,16 @@ fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPo
     val latestPoint = points.last()
 
     val alreadyHasNearbyDot = points.dropLast(1).any { oldPoint ->
-        distanceMeters(oldPoint.lat, oldPoint.lon, latestPoint.lat, latestPoint.lon) < 3.3
+        distanceMeters(oldPoint.lat, oldPoint.lon, latestPoint.lat, latestPoint.lon) < 1
     }
 
     if (alreadyHasNearbyDot) return
 
-    val latestIndex = points.size - 1
-    val latestIsRed = latestIndex % 2 == 0
-
     val sizePx = 72
 
-    val dotBitmap = if (latestIsRed) {
-        createDotBitmap(context, sizePx, red = 255, green = 0, blue = 0)
-    } else {
-        createDotBitmap(context, sizePx, red = 0, green = 255, blue = 0)
-    }
+    val dotBitmap = createDotBitmap(context, sizePx, red = 255, green = 0, blue = 0)
 
-    val marker = Marker(
-        LatLong(latestPoint.lat, latestPoint.lon),
-        dotBitmap,
-        0,
-        0
-    )
+    val marker = Marker(LatLong(latestPoint.lat, latestPoint.lon), dotBitmap, 0,0)
 
     segmentIndex?.let { index ->
         addPathIfNeeded(
@@ -229,23 +300,20 @@ fun drawOrReplaceSegment(
     mapView.layerManager.layers.add(polyline)
 }
 
+fun drawSessionDotsAndPaths(context: Context, mapView: MapView, sessionPoints: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType) {
+    if (sessionPoints.isEmpty()) return
 
+    for (i in sessionPoints.indices) {
+        val pointsUpToNow = sessionPoints.take(i + 1)
 
-/* REMOVE OVERLAYS: CURRENTLY ONLY THE DOTS */
-fun removeRouteLayers(mapView: MapView){
-    val layers = mapView.layerManager.layers
-    val toRemove = mutableListOf<Layer>()
-
-    for(layer in layers){
-        if(layer is Marker){
-            toRemove.add(layer)
-        }
+        addLatestDotIfNeeded(context, mapView, pointsUpToNow, walkedSegments, segmentIndex, pointsUpToNow.last().movementType)
     }
 
-    for(layer in toRemove){
-        layers.remove(layer)
-    }
+    mapView.layerManager.redrawLayers()
 }
+
+
+/* REMOVE OVERLAYS: DOTS AND PATHS */
 
 fun removeWalkedRoutes(mapView: MapView){
     val layers = mapView.layerManager.layers

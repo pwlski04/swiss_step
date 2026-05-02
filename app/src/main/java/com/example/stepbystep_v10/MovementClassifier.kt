@@ -6,7 +6,7 @@ enum class MovementType {STILL, WALKING, RUNNING, BIKING, TRANSPORT}
 
 fun MovementType.slowRanking(): Int {
     return when (this){
-        MovementType.STILL -> -1
+        MovementType.STILL -> 1000
         MovementType.WALKING -> 0
         MovementType.RUNNING -> 1
         MovementType.BIKING -> 2
@@ -35,7 +35,7 @@ class MovementClassifier {
 
         recentSpeedsKmh.addLast(speedKmh)
 
-        if (recentSpeedsKmh.size > 10) {
+        if (TrackingLiveState.isForegroundTracking.value && recentSpeedsKmh.size > 30 || !TrackingLiveState.isForegroundTracking.value && recentSpeedsKmh.size > 6) {
             recentSpeedsKmh.removeFirst()
         }
 

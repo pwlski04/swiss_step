@@ -13,7 +13,8 @@ data class PathPoint (
     val lat: Double,
     val lon: Double,
     val timestamp: Long,
-    val sessionId: Long
+    val sessionId: Long,
+    val movementType: MovementType
 )
 
 data class MatchedSegment(
