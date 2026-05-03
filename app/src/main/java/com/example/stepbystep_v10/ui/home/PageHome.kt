@@ -1,4 +1,4 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.ui.home
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -28,10 +28,31 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
+import androidx.compose.ui.text.style.TextAlign
 
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.stepbystep_v10.map.LocalProjector
+import com.example.stepbystep_v10.map.LocationMarker
+import com.example.stepbystep_v10.tracking.LocationTrackingService
+import com.example.stepbystep_v10.tracking.MovementType
+import com.example.stepbystep_v10.map.paths.Path
+import com.example.stepbystep_v10.map.paths.PathFunctions
+import com.example.stepbystep_v10.map.SegmentGridIndex
+import com.example.stepbystep_v10.tracking.TrackingLiveState
+import com.example.stepbystep_v10.map.addLatestDotIfNeeded
+import com.example.stepbystep_v10.map.applySmoothMapForceField
+import com.example.stepbystep_v10.map.paths.clearWalkedSegments
+import com.example.stepbystep_v10.map.copyAssetToInternalStorage
+import com.example.stepbystep_v10.map.createMapView
+import com.example.stepbystep_v10.map.drawSessionDotsAndPaths
+import com.example.stepbystep_v10.map.drawWalkedSegments
+import com.example.stepbystep_v10.tracking.loadIsTracking
+import com.example.stepbystep_v10.map.paths.loadPathsFromGeoJson
+import com.example.stepbystep_v10.map.paths.loadWalkedSegments
+import com.example.stepbystep_v10.map.removeWalkedRoutes
+import kotlinx.coroutines.delay
 import org.mapsforge.core.model.LatLong
 
 
@@ -93,7 +114,7 @@ fun Page_Home() {
                 applySmoothMapForceField(mv)
             }
 
-            kotlinx.coroutines.delay(16L)
+            delay(16L)
         }
     }
 
@@ -141,7 +162,7 @@ fun Page_Home() {
 
             when (event) {
                 Lifecycle.Event.ON_START -> {
-                    LocationTrackingService.useForegroundUpdates(context)
+                    LocationTrackingService.Companion.useForegroundUpdates(context)
                     Log.d("StepByStep_v1.0_TAG", "Using foreground location updates")
 
                     val mv = mapView
@@ -155,13 +176,20 @@ fun Page_Home() {
                             val sessionPoints = allPoints
                                 .filter { it.sessionId == latestSessionId }
 
-                            drawSessionDotsAndPaths(context, mv, sessionPoints, walkedSegments, segmentIndex, TrackingLiveState.movementType.value)
+                            drawSessionDotsAndPaths(
+                                context,
+                                mv,
+                                sessionPoints,
+                                walkedSegments,
+                                segmentIndex,
+                                TrackingLiveState.movementType.value
+                            )
                         }
                     }
                 }
 
                 Lifecycle.Event.ON_STOP -> {
-                    LocationTrackingService.useBackgroundUpdates(context)
+                    LocationTrackingService.Companion.useBackgroundUpdates(context)
                     Log.d("StepByStep_v1.0_TAG", "Using background location updates")
                 }
 
@@ -207,7 +235,7 @@ fun Page_Home() {
         var lastZoom = mv.model.mapViewPosition.zoomLevel
 
         while (true) {
-            kotlinx.coroutines.delay(150L)
+            delay(150L)
 
             val currentMapView = mapView ?: break
             val currentZoom = currentMapView.model.mapViewPosition.zoomLevel
@@ -216,7 +244,7 @@ fun Page_Home() {
                 lastZoom = currentZoom
 
                 if (allPaths.isNotEmpty() && walkedSegments.isNotEmpty()) {
-                    drawWalkedSegments(currentMapView, allPaths,walkedSegments)
+                    drawWalkedSegments(currentMapView, allPaths, walkedSegments)
 
                     currentMapView.layerManager.redrawLayers()
 
@@ -247,7 +275,14 @@ fun Page_Home() {
             val sessionPoints = PathFunctions.getAllPoints()
                 .filter { it.sessionId == point.sessionId }
 
-            addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegments, segmentIndex, liveMovementType)
+            addLatestDotIfNeeded(
+                context,
+                mv,
+                sessionPoints,
+                walkedSegments,
+                segmentIndex,
+                liveMovementType
+            )
 
             mv.layerManager.redrawLayers()
         }
@@ -297,7 +332,7 @@ fun Page_Home() {
                         modifier = Modifier
                         .width(160.dp)
                         .padding(top = 16.dp, bottom = 16.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        textAlign = TextAlign.Center
                     )
                 }
 
@@ -314,11 +349,11 @@ fun Page_Home() {
                             if (!isTracking) {
                                 val newSessionId = System.currentTimeMillis()
 
-                                LocationTrackingService.start(context, newSessionId) //tracker.start()
+                                LocationTrackingService.Companion.start(context, newSessionId) //tracker.start()
                                 isTracking = true
                                 Log.d("StepByStep_v1.0_TAG", "Tracking started")
                             } else {
-                                LocationTrackingService.stop(context) //tracker.stop()
+                                LocationTrackingService.Companion.stop(context) //tracker.stop()
                                 isTracking = false
                                 Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
                             }

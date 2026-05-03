@@ -1,4 +1,4 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.map
 
 import android.content.Context
 import org.mapsforge.core.model.LatLong
@@ -16,6 +16,7 @@ import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 import org.mapsforge.map.layer.overlay.Polyline
 
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint as AndroidPaint
 import org.mapsforge.core.graphics.Bitmap as MapsforgeBitmap
 import org.mapsforge.map.layer.overlay.Marker
@@ -23,6 +24,13 @@ import android.graphics.drawable.BitmapDrawable
 import android.location.Location
 import android.util.Log
 import androidx.core.graphics.createBitmap
+import com.example.stepbystep_v10.tracking.MovementType
+import com.example.stepbystep_v10.tracking.isSlowerThanOrEqual
+import com.example.stepbystep_v10.map.paths.Path
+import com.example.stepbystep_v10.map.paths.PathPoint
+import com.example.stepbystep_v10.map.paths.saveWalkedSegments
+import org.mapsforge.core.graphics.Style
+import kotlin.math.abs
 
 private val drawnSegmentLayers = mutableMapOf<String, Polyline>()
 
@@ -132,8 +140,8 @@ fun applySmoothMapForceField(mapView: MapView) {
     }
 
     val needsCorrection =
-        kotlin.math.abs(targetLat - center.latitude) > 0.000003 ||
-                kotlin.math.abs(targetLon - center.longitude) > 0.000003
+        abs(targetLat - center.latitude) > 0.000003 ||
+                abs(targetLon - center.longitude) > 0.000003
 
     if (needsCorrection) {
         mapView.setCenter(
@@ -169,7 +177,7 @@ fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: I
 
     val paint = AndroidPaint().apply {
         isAntiAlias = true
-        color = android.graphics.Color.argb(255, red, green, blue)
+        color = Color.argb(255, red, green, blue)
         style = AndroidPaint.Style.FILL
     }
 
@@ -311,7 +319,7 @@ fun drawOrReplaceSegment(
     val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
         color = colorForMovementType(movementType)
         strokeWidth = walkedPathStrokeWidth(mapView)
-        setStyle(org.mapsforge.core.graphics.Style.STROKE)
+        setStyle(Style.STROKE)
     }
 
     val polyline = Polyline(paint, AndroidGraphicFactory.INSTANCE).apply {

@@ -1,6 +1,7 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.map
 
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import androidx.core.graphics.createBitmap
 import org.mapsforge.core.model.LatLong
@@ -29,17 +30,17 @@ class LocationMarker {
         val canvas = Canvas(bitmap)
 
         val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.argb(60, 33, 150, 243)
+            color = Color.argb(60, 33, 150, 243)
             style = Paint.Style.FILL
         }
 
         val innerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.rgb(33, 150, 243)
+            color = Color.rgb(33, 150, 243)
             style = Paint.Style.FILL
         }
 
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.WHITE
+            color = Color.WHITE
             style = Paint.Style.STROKE
             strokeWidth = 4f
         }

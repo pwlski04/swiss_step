@@ -1,5 +1,6 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.map.paths
 
+import com.example.stepbystep_v10.tracking.MovementType
 import org.mapsforge.core.model.LatLong
 
 

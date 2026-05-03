@@ -1,24 +1,30 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.tracking
 
+import android.Manifest
+import android.R
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
-import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
-import android.content.pm.ServiceInfo
-import android.util.Log
-import com.google.android.gms.location.*
 import androidx.core.content.ContextCompat
+import com.example.stepbystep_v10.map.paths.PathFunctions
+import com.example.stepbystep_v10.map.paths.PathPoint
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 
 class LocationTrackingService: Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -60,7 +66,7 @@ class LocationTrackingService: Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("StepByStep tracking active")
             .setContentText("Recording your walking route.")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .build()
 
@@ -128,7 +134,13 @@ class LocationTrackingService: Service() {
     private fun handleLocation(location: Location) {
         val movementType = movementClassifier.classify(location)
 
-        val point = PathPoint(location.latitude, location.longitude, System.currentTimeMillis(), sessionId, movementType)
+        val point = PathPoint(
+            location.latitude,
+            location.longitude,
+            System.currentTimeMillis(),
+            sessionId,
+            movementType
+        )
 
         PathFunctions.addPoint(point)
 
@@ -208,7 +220,7 @@ class LocationTrackingService: Service() {
             NotificationManager.IMPORTANCE_LOW
         )
 
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(channel)
     }
 
@@ -225,7 +237,7 @@ class LocationTrackingService: Service() {
             val intent = Intent(context, LocationTrackingService::class.java)
                 .putExtra(EXTRA_SESSION_ID, sessionId)
 
-            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+            ContextCompat.startForegroundService(context, intent)
         }
 
         fun stop(context: Context) {

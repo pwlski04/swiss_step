@@ -1,8 +1,7 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.map.paths
 
 import android.content.Context
 import org.json.JSONArray
-import org.json.JSONObject
 import org.mapsforge.core.model.LatLong
 
 

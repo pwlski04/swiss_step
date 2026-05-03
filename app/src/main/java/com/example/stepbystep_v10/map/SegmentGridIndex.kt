@@ -1,4 +1,12 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.map
+
+import com.example.stepbystep_v10.map.paths.IndexedSegment
+import com.example.stepbystep_v10.map.paths.MatchedSegment
+import com.example.stepbystep_v10.map.paths.Path
+import com.example.stepbystep_v10.map.paths.PathPoint
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.sqrt
 
 class SegmentGridIndex(
     paths: List<Path>,
@@ -8,7 +16,7 @@ class SegmentGridIndex(
     private val grid = HashMap<Pair<Int, Int>, MutableList<IndexedSegment>>()
 
     private fun cell(value: Double): Int {
-        return kotlin.math.floor(value / cellSizeMeters).toInt()
+        return floor(value / cellSizeMeters).toInt()
     }
 
     init {
@@ -56,7 +64,7 @@ class SegmentGridIndex(
         val cx = cell(px)
         val cy = cell(py)
 
-        val radiusCells = kotlin.math.ceil(maxDistanceMeters / cellSizeMeters).toInt() + 1
+        val radiusCells = ceil(maxDistanceMeters / cellSizeMeters).toInt() + 1
 
         var bestSegment: IndexedSegment? = null
         var bestDistanceSquared = maxDistanceMeters * maxDistanceMeters
@@ -84,7 +92,7 @@ class SegmentGridIndex(
             MatchedSegment(
                 path = it.path,
                 segmentIndex = it.segmentIndex,
-                distanceMeters = kotlin.math.sqrt(bestDistanceSquared)
+                distanceMeters = sqrt(bestDistanceSquared)
             )
         }
     }

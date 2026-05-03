@@ -1,7 +1,8 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.map.paths
 
 import android.content.Context
 import android.util.Log
+import com.example.stepbystep_v10.tracking.MovementType
 import org.json.JSONObject
 import java.io.File
 

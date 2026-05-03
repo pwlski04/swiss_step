@@ -1,4 +1,4 @@
-package com.example.stepbystep_v10
+package com.example.stepbystep_v10.map.paths
 
 object PathFunctions {
     private val points = mutableListOf<PathPoint>()
