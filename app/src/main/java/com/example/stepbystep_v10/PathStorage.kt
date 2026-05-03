@@ -48,7 +48,13 @@ fun loadWalkedSegments(context: Context): MutableMap<String, MovementType>{
             val segmentId = keys.next()
             val movementName = jsonObject.getString(segmentId)
 
-            result[segmentId] = MovementType.valueOf(movementName)
+            val movementType = runCatching {
+                MovementType.valueOf(movementName)
+            }.getOrNull()
+
+            if (movementType != null) {
+                result[segmentId] = movementType
+            }
         }
 
         result

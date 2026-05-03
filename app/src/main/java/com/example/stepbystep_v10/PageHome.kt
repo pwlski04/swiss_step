@@ -185,26 +185,70 @@ fun Page_Home() {
     }
 
     LaunchedEffect(mapView, allPaths) {
-        val mv = mapView
+        val mv = mapView ?: return@LaunchedEffect
 
-        if (mv != null && allPaths.isNotEmpty() && walkedSegments.isNotEmpty()) {
-            drawWalkedSegments(mv, allPaths, walkedSegments)
+        if (allPaths.isEmpty()) return@LaunchedEffect
+
+        if (walkedSegments.isNotEmpty()) {
+            drawWalkedSegments(
+                mapView = mv,
+                allPaths = allPaths,
+                walkedSegments = walkedSegments
+            )
+
+            mv.layerManager.redrawLayers()
+
+            Log.d(
+                "StepByStep_v1.0_TAG",
+                "Restored walked paths: ${walkedSegments.size}"
+            )
+        }
+
+        var lastZoom = mv.model.mapViewPosition.zoomLevel
+
+        while (true) {
+            kotlinx.coroutines.delay(150L)
+
+            val currentMapView = mapView ?: break
+            val currentZoom = currentMapView.model.mapViewPosition.zoomLevel
+
+            if (lastZoom != currentZoom) {
+                lastZoom = currentZoom
+
+                if (allPaths.isNotEmpty() && walkedSegments.isNotEmpty()) {
+                    drawWalkedSegments(currentMapView, allPaths,walkedSegments)
+
+                    currentMapView.layerManager.redrawLayers()
+
+                    Log.d(
+                        "StepByStep_v1.0_TAG",
+                        "Redrew walked paths for zoom=$currentZoom"
+                    )
+                }
+            }
         }
     }
 
-    LaunchedEffect(latestLivePoint, mapView, segmentIndex) {
+
+    LaunchedEffect(latestLivePoint, mapView, segmentIndex, isTracking) {
         val point = latestLivePoint
         val mv = mapView
 
-        if (point != null && mv != null) {
-            locationMarker.update(mv, point.lat, point.lon, isTracking)
+        if (mv == null) return@LaunchedEffect
+
+        if (!isTracking) {
+            locationMarker.hide(mv)
+            return@LaunchedEffect
+        }
+
+        if (point != null) {
+            locationMarker.update(mv, point.lat, point.lon, true)
 
             val sessionPoints = PathFunctions.getAllPoints()
                 .filter { it.sessionId == point.sessionId }
 
             addLatestDotIfNeeded(context, mv, sessionPoints, walkedSegments, segmentIndex, liveMovementType)
 
-            //mv.setCenter(LatLong(point.lat, point.lon))
             mv.layerManager.redrawLayers()
         }
     }
@@ -337,7 +381,7 @@ fun Page_Home() {
                             val p = point
 
                             if (mv != null && p != null) {
-                                mv.setZoomLevel(18)
+                                mv.setZoomLevel(18.toByte())
                                 mv.setCenter(
                                     LatLong(
                                         p.lat,
