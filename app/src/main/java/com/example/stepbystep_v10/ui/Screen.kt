@@ -21,19 +21,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.stepbystep_v10.Page_Preferences
+import com.example.stepbystep_v10.map.paths.loadPathWidth
+import com.example.stepbystep_v10.map.paths.savePathWidth
+import com.example.stepbystep_v10.ui.preferences.Page_Preferences
 import com.example.stepbystep_v10.ui.home.Page_Home
 
 @Composable
 fun Screen() {
+    val context = LocalContext.current
+
     var page by rememberSaveable { mutableIntStateOf(0) }
+    var pathWidth by remember { mutableStateOf(loadPathWidth(context)) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(), bottomBar = {
@@ -49,9 +57,13 @@ fun Screen() {
                 .padding(innerPadding)
         ) {
             when (page) {
-                0 -> Page_Home()
-                1 -> Page_Preferences()
-                else -> Page_Home()
+                0 -> Page_Home(context, pathWidth)
+                1 -> Page_Preferences(pathWidth = pathWidth,
+                    onPathWidthChange = { newWidth ->
+                        pathWidth = newWidth
+                        savePathWidth(context, newWidth)
+                    })
+                else -> Page_Home(context, pathWidth)
             }
         }
     }

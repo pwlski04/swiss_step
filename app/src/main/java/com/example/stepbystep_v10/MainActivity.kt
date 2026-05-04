@@ -39,11 +39,3 @@ fun GreetingPreview() {
         Greeting("Android")
     }
 }
-
-
-/* PREFERENCE PAGE */
-
-@Composable
-fun Page_Preferences() {
-    Text(text = "Preferences page")
-}

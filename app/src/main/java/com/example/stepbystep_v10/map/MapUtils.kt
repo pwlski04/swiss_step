@@ -84,6 +84,7 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
     mapView.layerManager.layers.add(tileRendererLayer)
 
     mapView.setZoomLevelMin(13.toByte())
+    mapView.setZoomLevelMax(20.toByte())
     mapView.setCenter(LatLong(47.3769, 8.5417))
     mapView.setZoomLevel(13.toByte())
 
@@ -187,7 +188,7 @@ fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: I
     return AndroidGraphicFactory.convertToBitmap(BitmapDrawable(androidBitmap))
 }
 
-fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType) {
+fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType, pathWidth: Float) {
     if (points.isEmpty()) return
 
     val latestPoint = points.last()
@@ -212,7 +213,8 @@ fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPo
             walkedSegments,
             segmentIndex,
             maxDistanceMeters = 3.0,
-            movementType
+            movementType,
+            pathWidth
         )
     }
 
@@ -240,7 +242,7 @@ fun colorForMovementType(type: MovementType): Int {
     }
 }
 
-fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double, movementType: MovementType) {
+fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double, movementType: MovementType, pathWidth: Float) {
     val currSegment = segmentIndex.findClosest(point, maxDistanceMeters) ?: return
 
     val segmentId = "${currSegment.path.id}:${currSegment.segmentIndex}"
@@ -261,11 +263,11 @@ fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walked
     val segStart = currSegment.path.points[currSegment.segmentIndex]
     val segEnd = currSegment.path.points[currSegment.segmentIndex + 1]
 
-    drawOrReplaceSegment(mapView, segmentId, segStart, segEnd, movementType)
+    drawOrReplaceSegment(mapView, segmentId, segStart, segEnd, movementType, pathWidth)
     mapView.layerManager.redrawLayers()
 }
 
-fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegments: Map<String, MovementType>) {
+fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegments: Map<String, MovementType>, pathWidth: Float) {
     drawnSegmentLayers.values.toList().forEach { oldLayer ->
         mapView.layerManager.layers.remove(oldLayer)
     }
@@ -277,14 +279,14 @@ fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegments: M
             val segmentId = "${path.id}:$i"
             val movementType = walkedSegments[segmentId] ?: continue
 
-            drawOrReplaceSegment(mapView, segmentId, path.points[i], path.points[i + 1], movementType)
+            drawOrReplaceSegment(mapView, segmentId, path.points[i], path.points[i + 1], movementType, pathWidth)
         }
     }
 
     mapView.layerManager.redrawLayers()
 }
 
-fun drawSessionDotsAndPaths(context: Context, mapView: MapView, sessionPoints: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType) {
+fun drawSessionDotsAndPaths(context: Context, mapView: MapView, sessionPoints: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType, pathWidth: Float) {
     if (sessionPoints.isEmpty()) return
 
     for (i in sessionPoints.indices) {
@@ -296,7 +298,8 @@ fun drawSessionDotsAndPaths(context: Context, mapView: MapView, sessionPoints: L
             pointsUpToNow,
             walkedSegments,
             segmentIndex,
-            pointsUpToNow.last().movementType
+            pointsUpToNow.last().movementType,
+            pathWidth
         )
     }
 
@@ -308,7 +311,8 @@ fun drawOrReplaceSegment(
     segmentId: String,
     segStart: LatLong,
     segEnd: LatLong,
-    movementType: MovementType
+    movementType: MovementType,
+    pathWidth: Float
 ) {
     val oldLayer = drawnSegmentLayers[segmentId]
 
@@ -318,7 +322,7 @@ fun drawOrReplaceSegment(
 
     val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
         color = colorForMovementType(movementType)
-        strokeWidth = walkedPathStrokeWidth(mapView)
+        strokeWidth = walkedPathStrokeWidth(mapView, pathWidth)
         setStyle(Style.STROKE)
     }
 
@@ -331,12 +335,22 @@ fun drawOrReplaceSegment(
     mapView.layerManager.layers.add(polyline)
 }
 
-fun walkedPathStrokeWidth(mapView: MapView): Float {
+fun walkedPathStrokeWidth(mapView: MapView, inputWidth: Float): Float {
     val zoom = mapView.model.mapViewPosition.zoomLevel.toFloat()
 
     Log.d("StepByStep_v1.0_TAG", "Current zoom = $zoom")
 
-    return zoom
+    return when (zoom){
+        13f -> 2.5f
+        14f -> 5f
+        15f -> 10f
+        16f -> 15f
+        17f -> 25f
+        18f -> 35f
+        19f -> 50f
+        20f -> 75f
+        else -> {inputWidth}
+    }
 }
 
 

@@ -1,6 +1,7 @@
 package com.example.stepbystep_v10.ui.home
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -55,6 +56,8 @@ import com.example.stepbystep_v10.map.removeWalkedRoutes
 import kotlinx.coroutines.delay
 import org.mapsforge.core.model.LatLong
 
+import com.example.stepbystep_v10.map.paths.loadPathWidth
+
 
 /*
 TODO:
@@ -70,10 +73,8 @@ TODO:
  */
 
 @Composable
-fun Page_Home() {
+fun Page_Home(context: Context, pathWidth: Float) {
     val lifecycleOwner = LocalLifecycleOwner.current
-
-    val context = LocalContext.current
 
     var mapFilePath by remember { mutableStateOf<String?>(null) }
     var themeFilePath by remember { mutableStateOf<String?>(null) }
@@ -182,7 +183,8 @@ fun Page_Home() {
                                 sessionPoints,
                                 walkedSegments,
                                 segmentIndex,
-                                TrackingLiveState.movementType.value
+                                TrackingLiveState.movementType.value,
+                                pathWidth
                             )
                         }
                     }
@@ -219,9 +221,10 @@ fun Page_Home() {
 
         if (walkedSegments.isNotEmpty()) {
             drawWalkedSegments(
-                mapView = mv,
-                allPaths = allPaths,
-                walkedSegments = walkedSegments
+                mv,
+                allPaths,
+                walkedSegments,
+                pathWidth
             )
 
             mv.layerManager.redrawLayers()
@@ -244,7 +247,7 @@ fun Page_Home() {
                 lastZoom = currentZoom
 
                 if (allPaths.isNotEmpty() && walkedSegments.isNotEmpty()) {
-                    drawWalkedSegments(currentMapView, allPaths, walkedSegments)
+                    drawWalkedSegments(currentMapView, allPaths, walkedSegments, pathWidth)
 
                     currentMapView.layerManager.redrawLayers()
 
@@ -281,7 +284,8 @@ fun Page_Home() {
                 sessionPoints,
                 walkedSegments,
                 segmentIndex,
-                liveMovementType
+                liveMovementType,
+                pathWidth
             )
 
             mv.layerManager.redrawLayers()
@@ -313,7 +317,7 @@ fun Page_Home() {
                         onMapReady = { readyMapView: MapView ->
                             mapView = readyMapView
                             if (allPaths.isNotEmpty()) {
-                                drawWalkedSegments(readyMapView, allPaths, walkedSegments)
+                                drawWalkedSegments(readyMapView, allPaths, walkedSegments, pathWidth)
                             }
                             readyMapView.layerManager.redrawLayers()
                         }
@@ -328,7 +332,7 @@ fun Page_Home() {
                         .align(Alignment.TopCenter)
                         .padding(top = 8.dp)
                 ){
-                    Text(text = liveMovementType.name,
+                    Text(text = liveMovementType.name + ", ZOOM: "+ mapView?.model?.mapViewPosition?.zoomLevel?.toString(),
                         modifier = Modifier
                         .width(160.dp)
                         .padding(top = 16.dp, bottom = 16.dp),
