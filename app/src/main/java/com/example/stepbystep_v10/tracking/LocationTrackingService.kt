@@ -31,6 +31,25 @@ class LocationTrackingService: Service() {
     private var sessionId: Long = 0L
     private val movementClassifier = MovementClassifier()
 
+    private fun showForegroundNotification() {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("StepByStep tracking active")
+            .setContentText("Recording your walking route.")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setOngoing(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
 
     override fun onCreate() {
         super.onCreate()
@@ -40,6 +59,13 @@ class LocationTrackingService: Service() {
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        showForegroundNotification()
+
+        sessionId = intent?.getLongExtra(EXTRA_SESSION_ID, loadTrackingSessionId(this))
+            ?: loadTrackingSessionId(this)
+
+        saveTrackingState(this, true, sessionId)
+
         when (intent?.action) {
             ACTION_FOREGROUND_UPDATES -> {
                 Log.d("StepByStep_v1.0_TAG", "Service action: foreground updates")
@@ -58,32 +84,8 @@ class LocationTrackingService: Service() {
             }
         }
 
-        sessionId = intent?.getLongExtra(EXTRA_SESSION_ID, loadTrackingSessionId(this))
-            ?: loadTrackingSessionId(this)
-
-        saveTrackingState(this, true, sessionId)
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("StepByStep tracking active")
-            .setContentText("Recording your walking route.")
-            .setSmallIcon(R.drawable.ic_menu_mylocation)
-            .setOngoing(true)
-            .build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            )
-        } else {
-            startForeground(
-                NOTIFICATION_ID,
-                notification
-            )
-        }
-
         useForegroundUpdates = true
+        TrackingLiveState.isForegroundTracking.value = true
         startLocationUpdates()
 
         return START_STICKY
@@ -251,14 +253,14 @@ class LocationTrackingService: Service() {
             val intent = Intent(context, LocationTrackingService::class.java)
                 .setAction(ACTION_FOREGROUND_UPDATES)
 
-            ContextCompat.startForegroundService(context, intent)
+            context.startService(intent)
         }
 
         fun useBackgroundUpdates(context: Context) {
             val intent = Intent(context, LocationTrackingService::class.java)
                 .setAction(ACTION_BACKGROUND_UPDATES)
 
-            ContextCompat.startForegroundService(context, intent)
+            context.startService(intent)
         }
     }
 }

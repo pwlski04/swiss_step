@@ -7,7 +7,7 @@ import org.mapsforge.core.model.LatLong
 
 fun loadPathsFromGeoJson(context: Context): List<Path> {
     val jsonText = context.assets
-        .open("walking_paths.json")
+        .open("utilized_paths_0.json")
         .bufferedReader()
         .use { it.readText() }
 
@@ -33,10 +33,17 @@ fun loadPathsFromGeoJson(context: Context): List<Path> {
             )
         }
 
+        val highway = obj.optString("highway", "")
+        val walkable = obj.optBoolean("walkable", true)
+        val drivable = obj.optBoolean("drivable", false)
+
         paths.add(
             Path(
                 id = id,
-                points = points
+                points = points,
+                highway = highway,
+                walkable = walkable,
+                drivable = drivable
             )
         )
     }

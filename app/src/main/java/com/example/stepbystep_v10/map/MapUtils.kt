@@ -15,15 +15,9 @@ import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 
 import org.mapsforge.map.layer.overlay.Polyline
 
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint as AndroidPaint
-import org.mapsforge.core.graphics.Bitmap as MapsforgeBitmap
 import org.mapsforge.map.layer.overlay.Marker
-import android.graphics.drawable.BitmapDrawable
-import android.location.Location
 import android.util.Log
-import androidx.core.graphics.createBitmap
+import com.example.stepbystep_v10.map.paths.MatchedSegment
 import com.example.stepbystep_v10.tracking.MovementType
 import com.example.stepbystep_v10.tracking.isSlowerThanOrEqual
 import com.example.stepbystep_v10.map.paths.Path
@@ -33,6 +27,18 @@ import org.mapsforge.core.graphics.Style
 import kotlin.math.abs
 
 private val drawnSegmentLayers = mutableMapOf<String, Polyline>()
+private val partialSegmentLayers = mutableMapOf<String, Polyline>()
+data class SegmentProgress(
+    val minProgress: Double,
+    val maxProgress: Double,
+    val movementType: MovementType
+)
+
+data class LastMatchedPosition(
+    val pathId: Long,
+    val segmentIndex: Int,
+    val progress: Double
+)
 
 private const val ZURICH_MIN_LAT = 47.32
 private const val ZURICH_MAX_LAT = 47.43
@@ -170,58 +176,6 @@ fun getOutsideAmount(center: LatLong): Double {
     return maxOf(latOutside, lonOutside)
 }
 
-
-/* ADD OVERLAY DOTS: EXACT LCOATION FOR POSITION TRACKING */
-fun createDotBitmap(context: Context, sizePx: Int, red: Int, green: Int, blue: Int): MapsforgeBitmap {
-    val androidBitmap = createBitmap(sizePx, sizePx)
-    val canvas = Canvas(androidBitmap)
-
-    val paint = AndroidPaint().apply {
-        isAntiAlias = true
-        color = Color.argb(255, red, green, blue)
-        style = AndroidPaint.Style.FILL
-    }
-
-    val radius = sizePx / 2f
-    canvas.drawCircle(radius, radius, radius, paint)
-
-    return AndroidGraphicFactory.convertToBitmap(BitmapDrawable(androidBitmap))
-}
-
-fun addLatestDotIfNeeded(context: Context, mapView: MapView, points: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType, pathWidth: Float) {
-    if (points.isEmpty()) return
-
-    val latestPoint = points.last()
-
-    val alreadyHasNearbyDot = points.dropLast(1).any { oldPoint ->
-        distanceMeters(oldPoint.lat, oldPoint.lon, latestPoint.lat, latestPoint.lon) < 1
-    }
-
-    if (alreadyHasNearbyDot) return
-
-    val sizePx = 72
-
-    val dotBitmap = createDotBitmap(context, sizePx, red = 255, green = 0, blue = 0)
-
-    val marker = Marker(LatLong(latestPoint.lat, latestPoint.lon), dotBitmap, 0,0)
-
-    segmentIndex?.let { index ->
-        addPathIfNeeded(
-            context,
-            mapView,
-            latestPoint,
-            walkedSegments,
-            segmentIndex,
-            maxDistanceMeters = 3.0,
-            movementType,
-            pathWidth
-        )
-    }
-
-    mapView.layerManager.layers.add(marker)
-    mapView.layerManager.redrawLayers()
-}
-
 /* OVERLAY PATHS: DISPLAY WALKED PATHS */
 fun colorForMovementType(type: MovementType): Int {
     return when (type) {
@@ -240,31 +194,6 @@ fun colorForMovementType(type: MovementType): Int {
         MovementType.TRANSPORT ->
             AndroidGraphicFactory.INSTANCE.createColor(255, 120, 120, 120) // gray
     }
-}
-
-fun addPathIfNeeded(context: Context, mapView: MapView, point: PathPoint, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex, maxDistanceMeters: Double, movementType: MovementType, pathWidth: Float) {
-    val currSegment = segmentIndex.findClosest(point, maxDistanceMeters) ?: return
-
-    val segmentId = "${currSegment.path.id}:${currSegment.segmentIndex}"
-
-    val oldMovementType = walkedSegments[segmentId]
-
-    if (oldMovementType != null) {
-        val newTypeIsSlower = isSlowerThanOrEqual(movementType, oldMovementType)
-
-        if (!newTypeIsSlower) {
-            return
-        }
-    }
-
-    walkedSegments[segmentId] = movementType
-    saveWalkedSegments(context, walkedSegments)
-
-    val segStart = currSegment.path.points[currSegment.segmentIndex]
-    val segEnd = currSegment.path.points[currSegment.segmentIndex + 1]
-
-    drawOrReplaceSegment(mapView, segmentId, segStart, segEnd, movementType, pathWidth)
-    mapView.layerManager.redrawLayers()
 }
 
 fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegments: Map<String, MovementType>, pathWidth: Float) {
@@ -286,34 +215,8 @@ fun drawWalkedSegments(mapView: MapView, allPaths: List<Path>, walkedSegments: M
     mapView.layerManager.redrawLayers()
 }
 
-fun drawSessionDotsAndPaths(context: Context, mapView: MapView, sessionPoints: List<PathPoint>, walkedSegments: MutableMap<String, MovementType>, segmentIndex: SegmentGridIndex?, movementType: MovementType, pathWidth: Float) {
-    if (sessionPoints.isEmpty()) return
 
-    for (i in sessionPoints.indices) {
-        val pointsUpToNow = sessionPoints.take(i + 1)
-
-        addLatestDotIfNeeded(
-            context,
-            mapView,
-            pointsUpToNow,
-            walkedSegments,
-            segmentIndex,
-            pointsUpToNow.last().movementType,
-            pathWidth
-        )
-    }
-
-    mapView.layerManager.redrawLayers()
-}
-
-fun drawOrReplaceSegment(
-    mapView: MapView,
-    segmentId: String,
-    segStart: LatLong,
-    segEnd: LatLong,
-    movementType: MovementType,
-    pathWidth: Float
-) {
+fun drawOrReplaceSegment(mapView: MapView, segmentId: String, segStart: LatLong, segEnd: LatLong, movementType: MovementType, pathWidth: Float) {
     val oldLayer = drawnSegmentLayers[segmentId]
 
     if (oldLayer != null) {
@@ -332,6 +235,163 @@ fun drawOrReplaceSegment(
     }
 
     drawnSegmentLayers[segmentId] = polyline
+    mapView.layerManager.layers.add(polyline)
+}
+
+fun updateWalkedPathFromCurrentLocation(context: Context, mapView: MapView, currentPoint: PathPoint, walkedSegments: MutableMap<String, MovementType>, partialProgress: MutableMap<String, SegmentProgress>, segmentIndex: SegmentGridIndex?, movementType: MovementType, pathWidth: Float, lastMatchedPosition: LastMatchedPosition?): LastMatchedPosition? {
+    val index = segmentIndex ?: return lastMatchedPosition
+
+    val currSegment = index.findClosest(
+        currentPoint,
+        maxDistanceMeters = 10.0
+    ) ?: return lastMatchedPosition
+
+    if (movementType != MovementType.TRANSPORT && !currSegment.path.walkable) {
+        return lastMatchedPosition
+    }
+
+    if (movementType == MovementType.TRANSPORT && !currSegment.path.drivable) {
+        return lastMatchedPosition
+    }
+
+    val currentProgress = progressOnSegment(
+        point = currentPoint,
+        segment = currSegment
+    )
+
+    val currentPosition = LastMatchedPosition(
+        pathId = currSegment.path.id,
+        segmentIndex = currSegment.segmentIndex,
+        progress = currentProgress
+    )
+
+    fillGapBetweenMatches(context, mapView, currSegment.path, lastMatchedPosition, currentPosition, walkedSegments, partialProgress, movementType, pathWidth)
+
+    mapView.layerManager.redrawLayers()
+
+    return currentPosition
+}
+
+fun fillGapBetweenMatches(context: Context, mapView: MapView, path: Path, from: LastMatchedPosition?, to: LastMatchedPosition, walkedSegments: MutableMap<String, MovementType>, partialProgress: MutableMap<String, SegmentProgress>, movementType: MovementType, pathWidth: Float) {
+    if (from == null || from.pathId != to.pathId) {
+        drawProgressOnSegment(mapView, path, to.segmentIndex, to.progress, to.progress, partialProgress, movementType, pathWidth)
+        return
+    }
+
+    val fromSegment = from.segmentIndex
+    val toSegment = to.segmentIndex
+
+    if (fromSegment == toSegment) {
+        drawProgressOnSegment(mapView, path, toSegment, minOf(from.progress, to.progress), maxOf(from.progress, to.progress), partialProgress, movementType, pathWidth)
+        return
+    }
+
+    if (toSegment > fromSegment) {
+        drawProgressOnSegment(mapView, path, fromSegment, from.progress, 1.0, partialProgress, movementType, pathWidth)
+
+        for (segmentIndex in fromSegment + 1 until toSegment) {
+            completeSegment(context, mapView, path, segmentIndex, walkedSegments, partialProgress, movementType, pathWidth)
+        }
+
+        drawProgressOnSegment(mapView, path, toSegment, 0.0, to.progress, partialProgress, movementType, pathWidth)
+    } else {
+        drawProgressOnSegment(mapView, path, fromSegment, 0.0, from.progress, partialProgress, movementType, pathWidth)
+
+        for (segmentIndex in toSegment + 1 until fromSegment) {
+            completeSegment(context, mapView, path, segmentIndex, walkedSegments, partialProgress, movementType, pathWidth)
+        }
+
+        drawProgressOnSegment(mapView, path, toSegment, to.progress, 1.0, partialProgress, movementType, pathWidth)
+    }
+}
+
+fun drawProgressOnSegment(mapView: MapView, path: Path, segmentIndex: Int, minProgress: Double, maxProgress: Double, partialProgress: MutableMap<String, SegmentProgress>, movementType: MovementType, pathWidth: Float) {
+    val safeMinProgress = minProgress.coerceIn(0.0, 1.0)
+    val safeMaxProgress = maxProgress.coerceIn(0.0, 1.0)
+
+    val segmentId = "${path.id}:$segmentIndex"
+
+    val oldProgress = partialProgress[segmentId]
+
+    val newProgress =
+        if (oldProgress == null) {
+            SegmentProgress(
+                minProgress = minOf(safeMinProgress, safeMaxProgress),
+                maxProgress = maxOf(safeMinProgress, safeMaxProgress),
+                movementType = movementType
+            )
+        } else {
+            SegmentProgress(
+                minProgress = minOf(oldProgress.minProgress, safeMinProgress, safeMaxProgress),
+                maxProgress = maxOf(oldProgress.maxProgress, safeMinProgress, safeMaxProgress),
+                movementType = movementType
+            )
+        }
+
+    partialProgress[segmentId] = newProgress
+
+    val segStart = path.points[segmentIndex]
+    val segEnd = path.points[segmentIndex + 1]
+
+    drawOrReplacePartialSegment(mapView, segmentId, segStart, segEnd, newProgress, pathWidth)
+}
+
+fun completeSegment(context: Context, mapView: MapView, path: Path, segmentIndex: Int, walkedSegments: MutableMap<String, MovementType>, partialProgress: MutableMap<String, SegmentProgress>, movementType: MovementType, pathWidth: Float) {
+    val segmentId = "${path.id}:$segmentIndex"
+
+    val oldMovementType = walkedSegments[segmentId]
+
+    if (oldMovementType != null) {
+        val newTypeIsSlower = isSlowerThanOrEqual(
+            movementType,
+            oldMovementType
+        )
+
+        if (!newTypeIsSlower) {
+            return
+        }
+    }
+
+    walkedSegments[segmentId] = movementType
+    saveWalkedSegments(context, walkedSegments)
+
+    partialProgress.remove(segmentId)
+
+    val oldPartialLayer = partialSegmentLayers[segmentId]
+    if (oldPartialLayer != null) {
+        mapView.layerManager.layers.remove(oldPartialLayer)
+        partialSegmentLayers.remove(segmentId)
+    }
+
+    val segStart = path.points[segmentIndex]
+    val segEnd = path.points[segmentIndex + 1]
+
+    drawOrReplaceSegment(mapView, segmentId, segStart, segEnd, movementType, pathWidth)
+}
+
+fun drawOrReplacePartialSegment(mapView: MapView, segmentId: String, segStart: LatLong, segEnd: LatLong, progress: SegmentProgress, pathWidth: Float) {
+    val oldLayer = partialSegmentLayers[segmentId]
+
+    if (oldLayer != null) {
+        mapView.layerManager.layers.remove(oldLayer)
+    }
+
+    val partialStart = interpolateLatLong(segStart, segEnd, progress.minProgress)
+
+    val partialEnd = interpolateLatLong(segStart, segEnd, progress.maxProgress)
+
+    val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+        color = colorForMovementType(progress.movementType)
+        strokeWidth = walkedPathStrokeWidth(mapView, pathWidth)
+        setStyle(Style.STROKE)
+    }
+
+    val polyline = Polyline(paint, AndroidGraphicFactory.INSTANCE).apply {
+        latLongs.add(partialStart)
+        latLongs.add(partialEnd)
+    }
+
+    partialSegmentLayers[segmentId] = polyline
     mapView.layerManager.layers.add(polyline)
 }
 
@@ -368,6 +428,7 @@ fun removeWalkedRoutes(mapView: MapView){
     }
 
     drawnSegmentLayers.clear()
+    partialSegmentLayers.clear()
 
     mapView.layerManager.redrawLayers()
 }
@@ -392,23 +453,7 @@ fun copyAssetToInternalStorage(context: Context, assetName: String): String {
     return outFile.absolutePath
 }
 
-fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    """ Stores and returns the distance in meters between point 1 (lat1, lon1) and point 2 (lat2, lon2) in result """
-
-    val result = FloatArray(1)
-    Location.distanceBetween(lat1,lon1,lat2,lon2,result)
-
-    return result[0].toDouble()
-}
-
-fun distancePointToSegmentSquared(
-    px: Double,
-    py: Double,
-    ax: Double,
-    ay: Double,
-    bx: Double,
-    by: Double
-): Double {
+fun distancePointToSegmentSquared(px: Double, py: Double, ax: Double, ay: Double, bx: Double, by: Double): Double {
     val abx = bx - ax
     val aby = by - ay
     val apx = px - ax
@@ -430,4 +475,40 @@ fun distancePointToSegmentSquared(
     val dy = py - closestY
 
     return dx * dx + dy * dy
+}
+
+fun interpolateLatLong(start: LatLong, end: LatLong, progress: Double): LatLong {
+    val t = progress.coerceIn(0.0, 1.0)
+
+    val lat = start.latitude + (end.latitude - start.latitude) * t
+    val lon = start.longitude + (end.longitude - start.longitude) * t
+
+    return LatLong(lat, lon)
+}
+
+fun progressOnSegment(point: PathPoint, segment: MatchedSegment): Double {
+    val segStart = segment.path.points[segment.segmentIndex]
+    val segEnd = segment.path.points[segment.segmentIndex + 1]
+
+    val originLat = 47.3769
+    val latScale = 111_320.0
+    val lonScale = 111_320.0 * kotlin.math.cos(Math.toRadians(originLat))
+
+    val px = point.lon * lonScale
+    val py = point.lat * latScale
+
+    val ax = segStart.longitude * lonScale
+    val ay = segStart.latitude * latScale
+
+    val bx = segEnd.longitude * lonScale
+    val by = segEnd.latitude * latScale
+
+    val dx = bx - ax
+    val dy = by - ay
+
+    if (dx == 0.0 && dy == 0.0) return 0.0
+
+    val t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+
+    return t.coerceIn(0.0, 1.0)
 }

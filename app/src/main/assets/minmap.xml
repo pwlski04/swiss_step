@@ -21,9 +21,13 @@
         <line stroke="#DCEEFF" stroke-width="0.8" />
     </rule>
 
-    <!-- Walking streets -->
-    <rule e="way" k="highway" v="footway|path|pedestrian|steps|living_street|track">
+    <!-- walkable roads -->
+    <rule e="way" k="highway" v="path|pedestrian|steps|track|living_street|residential|service|unclassified|tertiary|tertiary_link">
         <line stroke="#DDDDDD" stroke-width="1.0" />
     </rule>
 
+    <!-- drivable larger roads -->
+    <rule e="way" k="highway" v="secondary|secondary_link|primary|primary_link|trunk|trunk_link">
+        <line stroke="#E6E6FA" stroke-width="1.0" />
+    </rule>
 </rendertheme>
