@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.stepbystep_v10"
+    namespace = "com.example.stepMap_v10"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
