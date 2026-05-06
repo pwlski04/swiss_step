@@ -4,6 +4,7 @@ import com.example.stepMap_v10.paths.IndexedSegment
 import com.example.stepMap_v10.paths.MatchedSegment
 import com.example.stepMap_v10.paths.Path
 import com.example.stepMap_v10.paths.PathPoint
+import com.example.stepMap_v10.paths.distancePointToSegmentSquared
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.sqrt

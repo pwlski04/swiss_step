@@ -2,9 +2,12 @@ package com.example.stepMap_v10.map
 
 import android.content.Context
 import android.util.Log
+import com.example.stepMap_v10.paths.LastMatchedPosition
 import com.example.stepMap_v10.paths.Path
 import com.example.stepMap_v10.paths.PathPoint
+import com.example.stepMap_v10.paths.SegmentProgress
 import com.example.stepMap_v10.paths.loadWalkedSegments
+import com.example.stepMap_v10.paths.progressOnSegment
 import com.example.stepMap_v10.paths.saveWalkedSegments
 import com.example.stepMap_v10.tracking.MovementType
 import com.example.stepMap_v10.tracking.isSlowerThanOrEqual

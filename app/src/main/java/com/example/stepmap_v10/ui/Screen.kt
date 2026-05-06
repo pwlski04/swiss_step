@@ -85,33 +85,30 @@ fun NavBar(modifier: Modifier = Modifier, currentPage: Int, onPageChange: (Int) 
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
-            .background(Color(red = 232, green = 232, blue = 232, 255))
+            .background(Color(red = 232, green = 232, blue = 232, 255), shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceAround,
     ) {
         NavBarIsland(
-            modifier  = modifier.weight(1f).then(
+            modifier  = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).then(
                 if (currentPage == 0){
-                    Modifier.clip(RoundedCornerShape(12.dp)).background(selectedColor)
+                    Modifier.background(selectedColor, shape = RoundedCornerShape(12.dp))
                 } else {
                     Modifier
                 }
             ),
-            color = Color.Black,
             icon = Icons.Outlined.Home,
             description = "Home",
             onClick = { onPageChange(0) })
         NavBarIsland(
-            modifier = modifier.weight(1f).then(
+            modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).then(
                 if (currentPage == 1){
-                    Modifier.clip(RoundedCornerShape(12.dp)).background(selectedColor)
+                    Modifier.background(selectedColor, shape = RoundedCornerShape(12.dp))
                 } else {
                     Modifier
                 }
             ),
-            color = Color.Black,
             icon = Icons.Outlined.Person,
             description = "Profile",
             onClick = { onPageChange(1) })
@@ -119,10 +116,11 @@ fun NavBar(modifier: Modifier = Modifier, currentPage: Int, onPageChange: (Int) 
 }
 
 @Composable
-fun NavBarIsland(modifier: Modifier, color: Color, icon: ImageVector?, description: String, onClick: () -> Unit) {
+fun NavBarIsland(modifier: Modifier, icon: ImageVector?, description: String, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .padding(8.dp),
     ) {
@@ -131,11 +129,11 @@ fun NavBarIsland(modifier: Modifier, color: Color, icon: ImageVector?, descripti
                 .size(24.dp)
         ) {
             if (icon != null) {
-                Icon(imageVector = icon, contentDescription = description, tint = color)
+                Icon(imageVector = icon, contentDescription = description, tint = Color.Black)
             }
         }
 
         Spacer(modifier = Modifier.height(4.dp))
-        Text(text = description, color = color)
+        Text(text = description, color = Color.Black)
     }
 }
