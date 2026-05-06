@@ -12,8 +12,8 @@ import org.mapsforge.map.layer.overlay.Marker
 class LocationMarker {
     private var currentLocationMarker: Marker? = null
 
-    fun update(mapView: MapView, lat: Double, lon: Double, isTracking: Boolean) {
-        if(!isTracking){
+    fun update(mapView: MapView, lat: Double, lon: Double, isVisible: Boolean) {
+        if(!isVisible){
             hide(mapView)
             return
         }

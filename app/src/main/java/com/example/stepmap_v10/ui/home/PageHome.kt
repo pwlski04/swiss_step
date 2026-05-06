@@ -1,6 +1,5 @@
 package com.example.stepMap_v10.ui.home
 
-import android.Manifest
 import android.content.Context
 import android.util.Log
 import androidx.compose.foundation.layout.*
@@ -43,7 +42,6 @@ TODO:
 - to fix:
     - background tracking doesnt draw paths
     - instead of closest segment -> all segments in a radius
-    - pinpoint current location should work even when not saving paths
 - experience
     - save paths under a name when resetting to reuse later
     - improve map boundaries
@@ -70,7 +68,7 @@ fun Page_Home(context: Context, pathWidth: Float) {
             segmentIndex = segmentIndex,
             pathWidth = pathWidth,
 
-            isTracking = isTracking,
+            isDrawing = isDrawing,
             latestLivePoint = latestLivePoint,
             liveMovementType = liveMovementType,
             locationMarker = locationMarker,
@@ -82,6 +80,7 @@ fun Page_Home(context: Context, pathWidth: Float) {
             },
 
             permissionLauncher = permissionLauncher,
+            hasLocationPermission = hasLocationPermission,
             onLocationPermissionChange = { granted ->
                 hasLocationPermission = granted
             },
@@ -167,24 +166,12 @@ fun Page_Home(context: Context, pathWidth: Float) {
                         Surface(
                             // BUTTON: START/STOP TRACKING
                             onClick = {
-                                if (!hasLocationPermission) {
-                                    permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                                    return@Surface
-                                }
-
-                                if (!isTracking) {
-                                    val newSessionId = System.currentTimeMillis()
-
-                                    LocationTrackingService.Companion.start(
-                                        context,
-                                        newSessionId
-                                    ) //tracker.start()
-                                    isTracking = true
-                                    Log.d("StepByStep_v1.0_TAG", "Tracking started")
+                                if (!isDrawing) {
+                                    isDrawing = true
+                                    Log.d("StepByStep_v1.0_TAG", "Drawing started")
                                 } else {
-                                    LocationTrackingService.Companion.stop(context) //tracker.stop()
-                                    isTracking = false
-                                    Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
+                                    isDrawing = false
+                                    Log.d("StepByStep_v1.0_TAG", "Drawing stopped")
                                 }
                             },
                             shape = RoundedCornerShape(18.dp),
@@ -194,14 +181,14 @@ fun Page_Home(context: Context, pathWidth: Float) {
                                 .padding(top = 8.dp, end = 12.dp)
                         ) {
                             Icon(
-                                imageVector = if (isTracking) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = if (isTracking) "Stop tracking" else "Start tracking",
+                                imageVector = if (isDrawing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = if (isDrawing) "Stop tracking" else "Start tracking",
                                 modifier = Modifier.padding(14.dp)
                             )
                         }
 
 
-                        if (!isTracking) {
+                        if (!isDrawing) {
                             Surface(
                                 //BUTTON: REMOVE HISTORY
                                 onClick = {
@@ -214,7 +201,7 @@ fun Page_Home(context: Context, pathWidth: Float) {
                                     TrackingLiveState.movementType.value = MovementType.STILL
 
                                     mapView?.let { mv ->
-                                        locationMarker.hide(mv)
+                                        //locationMarker.hide(mv)
                                         removeWalkedRoutes(mv)
                                         mv.layerManager.redrawLayers()
                                     }
@@ -249,13 +236,7 @@ fun Page_Home(context: Context, pathWidth: Float) {
 
                                 if (mv != null && p != null) {
                                     mv.setZoomLevel(18.toByte())
-                                    mv.setCenter(
-                                        LatLong(
-                                            p.lat,
-                                            p.lon
-                                        )
-                                    )
-
+                                    mv.setCenter(LatLong(p.lat, p.lon))
                                     mv.layerManager.redrawLayers()
                                 }
                             },
@@ -360,9 +341,9 @@ fun Page_Home(context: Context, pathWidth: Float) {
                 }
             }
 
-            if (isTracking) {
+            if (isDrawing) {
                 Text(
-                    text = "Tracking active",
+                    text = "Drawing active",
                     modifier = Modifier.padding(8.dp)
                 )
             }

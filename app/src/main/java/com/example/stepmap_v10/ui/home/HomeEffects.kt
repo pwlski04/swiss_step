@@ -44,7 +44,7 @@ fun HomeEffects(
     segmentIndex: SegmentGridIndex?,
     pathWidth: Float,
 
-    isTracking: Boolean,
+    isDrawing: Boolean,
     latestLivePoint: PathPoint?,
     liveMovementType: MovementType,
     locationMarker: LocationMarker,
@@ -53,14 +53,58 @@ fun HomeEffects(
     lastMatchedPosition: LastMatchedPosition?,
     onLastMatchedPositionChange: (LastMatchedPosition?) -> Unit,
 
+    hasLocationPermission: Boolean,
     onLocationPermissionChange: (Boolean) -> Unit,
     permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
 
     onMapFilesLoaded: (mapPath: String, themePath: String) -> Unit,
     onPathsLoaded: (List<Path>) -> Unit,
     onError: (String) -> Unit,
+    ){
 
-){
+    /* START TRACKING WHEN LOCATION PERMISSION IS GRANTED */
+    /* STOP TRACKING WHEN LOCATION PERMISSION IS REVOKED, OR ON DISPOSE && NOT DRAWING */
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission){
+            val newSessionId = System.currentTimeMillis()
+            LocationTrackingService.Companion.start(
+                context,
+                newSessionId
+            )
+            Log.d("StepByStep_v1.0_TAG", "Tracking started")
+        } else {
+            LocationTrackingService.Companion.stop(context) //tracker.stop()
+            Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
+        }
+    }
+    DisposableEffect(hasLocationPermission, isDrawing) {
+        onDispose {
+            if (!isDrawing){
+                LocationTrackingService.Companion.stop(context) //tracker.stop()
+                Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
+            }
+        }
+    }
+
+    /* UPDATE LOCATION MARKER WHEN CURRENT LOCATION MOVES */
+    /* UPDATE PATH WITH LOCATION MARKER IF DRAWING IS ON */
+    LaunchedEffect(latestLivePoint, mapView, segmentIndex, isDrawing, pathWidth) {
+        val mv = mapView ?: return@LaunchedEffect
+
+        if (latestLivePoint != null) {
+            locationMarker.update(mv, latestLivePoint.lat, latestLivePoint.lon, true)
+
+            if(isDrawing){
+                val newLastMatchedPosition = updateWalkedPathFromCurrentLocation(context, mv,
+                    latestLivePoint, walkedSegments, partialProgress, segmentIndex, liveMovementType, pathWidth, lastMatchedPosition)
+                onLastMatchedPositionChange(newLastMatchedPosition)
+            }
+        }
+    }
+
+
+    /* OTHER */
+
     LaunchedEffect(mapView) {
         while (mapView != null) {
             mapView?.let { mv ->
@@ -114,9 +158,9 @@ fun HomeEffects(
         }
     }
 
-    DisposableEffect(lifecycleOwner, isTracking) {
+    DisposableEffect(lifecycleOwner, isDrawing) {
         val observer = LifecycleEventObserver { _, event ->
-            if (!isTracking) return@LifecycleEventObserver
+            if (!isDrawing) return@LifecycleEventObserver
 
             when (event) {
                 Lifecycle.Event.ON_START -> {
@@ -155,14 +199,6 @@ fun HomeEffects(
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    LaunchedEffect(isTracking, mapView) {
-        if (!isTracking) {
-            mapView?.let { mv ->
-                locationMarker.hide(mv)
-            }
         }
     }
 
@@ -209,26 +245,6 @@ fun HomeEffects(
                     )
                 }
             }
-        }
-    }
-
-
-    LaunchedEffect(latestLivePoint, mapView, segmentIndex, isTracking, pathWidth) {
-        val point = latestLivePoint
-        val mv = mapView
-
-        if (mv == null) return@LaunchedEffect
-
-        if (!isTracking) {
-            locationMarker.hide(mv)
-            return@LaunchedEffect
-        }
-
-        if (point != null) {
-            locationMarker.update(mv, point.lat, point.lon, true)
-
-            val newLastMatchedPosition = updateWalkedPathFromCurrentLocation(context, mv, point, walkedSegments, partialProgress, segmentIndex, liveMovementType, pathWidth, lastMatchedPosition)
-            onLastMatchedPositionChange(newLastMatchedPosition)
         }
     }
 }

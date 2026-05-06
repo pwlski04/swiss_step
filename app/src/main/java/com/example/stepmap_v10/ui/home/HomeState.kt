@@ -21,7 +21,7 @@ import com.example.stepMap_v10.paths.Path
 import com.example.stepMap_v10.paths.loadWalkedSegments
 import com.example.stepMap_v10.tracking.MovementType
 import com.example.stepMap_v10.tracking.TrackingLiveState
-import com.example.stepMap_v10.tracking.loadIsTracking
+import com.example.stepMap_v10.tracking.loadIsDrawing
 import org.mapsforge.map.android.view.MapView
 
 class HomeState(
@@ -30,7 +30,7 @@ class HomeState(
     val projector: LocalProjector,
     val locationMarker: LocationMarker,
     val permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
-    initialIsTracking: Boolean
+    initialIsDrawing: Boolean
 ) {
     // DEFAULT (no values in state): by remember {x} => by x
     var mapFilePath by mutableStateOf<String?>(null)
@@ -41,7 +41,7 @@ class HomeState(
 
     var allPaths by mutableStateOf<List<Path>>(emptyList())
 
-    var isTracking by mutableStateOf(initialIsTracking)     //var isTracking by remember { mutableStateOf(false) }
+    var isDrawing by mutableStateOf(initialIsDrawing)
 
     val partialProgress = mutableMapOf<String, SegmentProgress>()
     var lastMatchedPosition by mutableStateOf<LastMatchedPosition?>(null)
@@ -69,7 +69,7 @@ fun RememberHomeState(context: Context): HomeState{
 
     val state = remember {
         HomeState(
-            lifecycleOwner, loadWalkedSegments(context), LocalProjector(originLat = 47.3769), LocationMarker(), permissionLauncher, loadIsTracking(context)
+            lifecycleOwner, loadWalkedSegments(context), LocalProjector(originLat = 47.3769), LocationMarker(), permissionLauncher, loadIsDrawing(context)
         )
     }
 
