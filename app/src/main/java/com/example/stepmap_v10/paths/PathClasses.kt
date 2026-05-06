@@ -39,3 +39,19 @@ data class IndexedSegment(
     val minY: Double,
     val maxY: Double,
 )
+
+
+/* FROM UTILS FILE: */
+
+data class SegmentProgress(
+    val minProgress: Double,
+    val maxProgress: Double,
+    val movementType: MovementType
+)
+
+
+data class LastMatchedPosition(
+    val pathId: Long,
+    val segmentIndex: Int,
+    val progress: Double
+)

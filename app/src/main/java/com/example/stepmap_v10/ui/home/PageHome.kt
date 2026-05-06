@@ -23,18 +23,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 import androidx.compose.ui.text.style.TextAlign
 
-import com.example.stepMap_v10.tracking.LocationTrackingService
 import com.example.stepMap_v10.tracking.MovementType
-import com.example.stepMap_v10.paths.PathFunctions
 import com.example.stepMap_v10.map.SegmentGridIndex
 import com.example.stepMap_v10.tracking.TrackingLiveState
 import com.example.stepMap_v10.paths.clearWalkedSegments
-import com.example.stepMap_v10.map.drawWalkedSegments
 import com.example.stepMap_v10.paths.PathPoint
-import com.example.stepMap_v10.map.removeWalkedRoutes
 import org.mapsforge.core.model.LatLong
 
-import com.example.stepMap_v10.map.updateWalkedPathFromCurrentLocation
+import com.example.stepMap_v10.paths.updateWalkedPathFromCurrentLocation
+import com.example.stepMap_v10.paths.drawWalkedSegments
+import com.example.stepMap_v10.paths.removeWalkedRoutes
 
 
 /*
@@ -194,9 +192,6 @@ fun Page_Home(context: Context, pathWidth: Float) {
                                 onClick = {
                                     walkedSegments.clear()
                                     clearWalkedSegments(context)
-
-                                    PathFunctions.clear()
-
                                     TrackingLiveState.latestPoint.value = null
                                     TrackingLiveState.movementType.value = MovementType.STILL
 

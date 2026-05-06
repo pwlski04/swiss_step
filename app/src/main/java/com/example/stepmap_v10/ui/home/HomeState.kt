@@ -12,11 +12,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.stepMap_v10.map.LastMatchedPosition
+import com.example.stepMap_v10.paths.LastMatchedPosition
 import com.example.stepMap_v10.map.LocalProjector
 import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepMap_v10.map.SegmentGridIndex
-import com.example.stepMap_v10.map.SegmentProgress
+import com.example.stepMap_v10.paths.SegmentProgress
 import com.example.stepMap_v10.paths.Path
 import com.example.stepMap_v10.paths.loadWalkedSegments
 import com.example.stepMap_v10.tracking.MovementType

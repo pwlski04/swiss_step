@@ -16,7 +16,6 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.example.stepMap_v10.paths.PathFunctions
 import com.example.stepMap_v10.paths.PathPoint
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -144,8 +143,6 @@ class LocationTrackingService: Service() {
             sessionId,
             movementType
         )
-
-        PathFunctions.addPoint(point)
 
         PathRecorder.recordLocation(this, point, movementType)
 
