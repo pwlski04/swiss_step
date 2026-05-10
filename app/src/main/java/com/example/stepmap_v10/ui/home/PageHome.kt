@@ -17,29 +17,21 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 import androidx.compose.ui.text.style.TextAlign
 
-import com.example.stepMap_v10.tracking.MovementType
-import com.example.stepMap_v10.map.SegmentGridIndex
-import com.example.stepMap_v10.tracking.TrackingLiveState
-import com.example.stepMap_v10.paths.clearWalkedSegments
-import com.example.stepMap_v10.paths.PathPoint
 import org.mapsforge.core.model.LatLong
-
-import com.example.stepMap_v10.paths.updateWalkedPathFromCurrentLocation
-import com.example.stepMap_v10.paths.drawWalkedSegments
-import com.example.stepMap_v10.paths.removeWalkedRoutes
 
 
 /*
 TODO:
 - to fix:
-    - background tracking doesnt draw paths
+    - background tracking doesn't draw paths
     - instead of closest segment -> all segments in a radius
+    - quickly switching between pages crashes the app
+    - location marker is under the paths while drawing
 - experience
     - save paths under a name when resetting to reuse later
     - improve map boundaries
@@ -51,8 +43,6 @@ TODO:
 
 @Composable
 fun Page_Home(context: Context, pathWidth: Float) {
-    //TEST
-    var fakeStep by remember { mutableIntStateOf(0) }
     val state = RememberHomeState(context)
 
     with(state) { // To not have to write state.xyz everywhere
@@ -62,48 +52,25 @@ fun Page_Home(context: Context, pathWidth: Float) {
 
             mapView = mapView,
             allPaths = allPaths,
-            walkedSegments = walkedSegments,
-            segmentIndex = segmentIndex,
-            pathWidth = pathWidth,
+
+            pathStorage = pathStorage,           // ← new
+            pathOverlayLayer = pathOverlayLayer, // ← new
 
             isDrawing = isDrawing,
             latestLivePoint = latestLivePoint,
             liveMovementType = liveMovementType,
             locationMarker = locationMarker,
 
-            partialProgress = partialProgress,
-            lastMatchedPosition = lastMatchedPosition,
-            onLastMatchedPositionChange = { newValue ->
-                lastMatchedPosition = newValue
-            },
-
             permissionLauncher = permissionLauncher,
             hasLocationPermission = hasLocationPermission,
-            onLocationPermissionChange = { granted ->
-                hasLocationPermission = granted
-            },
+            onLocationPermissionChange = { granted -> hasLocationPermission = granted },
 
             onMapFilesLoaded = { mapPath, themePath ->
                 mapFilePath = mapPath
                 themeFilePath = themePath
             },
-            onPathsLoaded = { loadedPaths ->
-                allPaths = loadedPaths
-
-                segmentIndex =
-                    if (loadedPaths.isEmpty()) {
-                        null
-                    } else {
-                        SegmentGridIndex(
-                            paths = loadedPaths,
-                            projector = projector,
-                            cellSizeMeters = 20.0
-                        )
-                    }
-            },
-            onError = { message ->
-                errorMessage = message
-            }
+            onPathsLoaded = { loadedPaths -> allPaths = loadedPaths },
+            onError = { message -> errorMessage = message }
         )
 
         /* FRONTEND */
@@ -129,14 +96,6 @@ fun Page_Home(context: Context, pathWidth: Float) {
                             themeFilePath = themeFilePath!!,
                             onMapReady = { readyMapView: MapView ->
                                 mapView = readyMapView
-                                if (allPaths.isNotEmpty()) {
-                                    drawWalkedSegments(
-                                        readyMapView,
-                                        allPaths,
-                                        walkedSegments,
-                                        pathWidth
-                                    )
-                                }
                                 readyMapView.layerManager.redrawLayers()
                             }
                         )
@@ -190,16 +149,8 @@ fun Page_Home(context: Context, pathWidth: Float) {
                             Surface(
                                 //BUTTON: REMOVE HISTORY
                                 onClick = {
-                                    walkedSegments.clear()
-                                    clearWalkedSegments(context)
-                                    TrackingLiveState.latestPoint.value = null
-                                    TrackingLiveState.movementType.value = MovementType.STILL
-
-                                    mapView?.let { mv ->
-                                        //locationMarker.hide(mv)
-                                        removeWalkedRoutes(mv)
-                                        mv.layerManager.redrawLayers()
-                                    }
+                                    state.pathStorage.clearSegments()
+                                    mapView?.layerManager?.redrawLayers()
                                 },
                                 shape = RoundedCornerShape(18.dp),
                                 tonalElevation = 6.dp,
@@ -286,52 +237,6 @@ fun Page_Home(context: Context, pathWidth: Float) {
                                 modifier = Modifier.padding(14.dp)
                             )
                         }
-                    }
-
-                    Button(
-                        onClick = {
-                            val mv = mapView ?: return@Button
-                            val path = allPaths.firstOrNull { it.walkable && it.points.size >= 2 }
-                                ?: return@Button
-
-                            val start = path.points[0]
-                            val end = path.points[1]
-
-                            val t = (fakeStep.coerceAtMost(10)) / 10.0
-
-                            val lat = start.latitude + (end.latitude - start.latitude) * t
-                            val lon = start.longitude + (end.longitude - start.longitude) * t
-
-                            val point = PathPoint(
-                                lat,
-                                lon,
-                                System.currentTimeMillis(),
-                                999L,
-                                MovementType.WALKING
-                            )
-
-                            locationMarker.update(mv, point.lat, point.lon, true)
-
-                            lastMatchedPosition = updateWalkedPathFromCurrentLocation(
-                                context,
-                                mv,
-                                point,
-                                walkedSegments,
-                                partialProgress,
-                                segmentIndex,
-                                MovementType.WALKING,
-                                pathWidth,
-                                lastMatchedPosition
-                            )
-
-                            fakeStep++
-
-                            if (fakeStep > 10) {
-                                fakeStep = 0
-                            }
-                        }
-                    ) {
-                        Text("Fake path progress")
                     }
                 }
             }

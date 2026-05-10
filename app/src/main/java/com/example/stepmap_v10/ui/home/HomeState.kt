@@ -12,11 +12,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.stepMap_v10.chains.PathOverlayLayer
+import com.example.stepMap_v10.chains.PathStorage
 import com.example.stepMap_v10.paths.LastMatchedPosition
 import com.example.stepMap_v10.map.LocalProjector
 import com.example.stepMap_v10.map.LocationMarker
-import com.example.stepMap_v10.map.SegmentGridIndex
-import com.example.stepMap_v10.paths.SegmentProgress
 import com.example.stepMap_v10.paths.Path
 import com.example.stepMap_v10.paths.loadWalkedSegments
 import com.example.stepMap_v10.tracking.MovementType
@@ -43,7 +43,6 @@ class HomeState(
 
     var isDrawing by mutableStateOf(initialIsDrawing)
 
-    val partialProgress = mutableMapOf<String, SegmentProgress>()
     var lastMatchedPosition by mutableStateOf<LastMatchedPosition?>(null)
 
     // GET (no state): x = y => x get() = y
@@ -52,7 +51,11 @@ class HomeState(
     val liveMovementType
         get() = TrackingLiveState.movementType.value
 
-    var segmentIndex by mutableStateOf<SegmentGridIndex?>(null)
+    // Chain rendering (create once)
+    val pathStorage = PathStorage()
+    val pathOverlayLayer = PathOverlayLayer(pathStorage).also {
+        pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
+    }
 }
 
 @Composable

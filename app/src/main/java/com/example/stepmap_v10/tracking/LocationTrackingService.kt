@@ -24,8 +24,6 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 
-import com.example.stepMap_v10.map.PathRecorder
-
 class LocationTrackingService: Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var sessionId: Long = 0L
@@ -143,8 +141,6 @@ class LocationTrackingService: Service() {
             sessionId,
             movementType
         )
-
-        PathRecorder.recordLocation(this, point, movementType)
 
         TrackingLiveState.latestPoint.value = point
         TrackingLiveState.movementType.value = movementType

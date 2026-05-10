@@ -1,6 +1,7 @@
 package com.example.stepMap_v10.map
 
 import android.content.Context
+import com.example.stepMap_v10.chains.PathOverlayLayer
 import org.mapsforge.core.model.LatLong
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.android.util.AndroidUtil
@@ -13,17 +14,6 @@ import java.io.File
 import org.mapsforge.map.rendertheme.ExternalRenderTheme
 import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 
-import org.mapsforge.map.layer.overlay.Polyline
-
-import org.mapsforge.map.layer.overlay.Marker
-import android.util.Log
-import com.example.stepMap_v10.paths.MatchedSegment
-import com.example.stepMap_v10.tracking.MovementType
-import com.example.stepMap_v10.tracking.isSlowerThanOrEqual
-import com.example.stepMap_v10.paths.Path
-import com.example.stepMap_v10.paths.PathPoint
-import com.example.stepMap_v10.paths.saveWalkedSegments
-import org.mapsforge.core.graphics.Style
 import kotlin.math.abs
 
 private const val ZURICH_MIN_LAT = 47.32
@@ -74,6 +64,9 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
     }
 
     mapView.layerManager.layers.add(tileRendererLayer)
+
+    val travelOverlay = PathOverlayLayer(travelStore) // travelStore is the routes that were walked => data to be rendered
+    mapView.layerManager.layers.add(travelOverlay)
 
     mapView.setZoomLevelMin(13.toByte())
     mapView.setZoomLevelMax(20.toByte())
@@ -161,27 +154,6 @@ fun getOutsideAmount(center: LatLong): Double {
 
     return maxOf(latOutside, lonOutside)
 }
-
-/* OVERLAY PATHS: DISPLAY WALKED PATHS */
-fun colorForMovementType(type: MovementType): Int {
-    return when (type) {
-        MovementType.STILL ->
-            AndroidGraphicFactory.INSTANCE.createColor(255, 180, 180, 180)
-
-        MovementType.WALKING ->
-            AndroidGraphicFactory.INSTANCE.createColor(255, 255, 165, 0) // orange
-
-        MovementType.RUNNING ->
-            AndroidGraphicFactory.INSTANCE.createColor(255, 255, 0, 0) // red
-
-        MovementType.BIKING ->
-            AndroidGraphicFactory.INSTANCE.createColor(255, 0, 150, 255) // blue
-
-        MovementType.TRANSPORT ->
-            AndroidGraphicFactory.INSTANCE.createColor(255, 120, 120, 120) // gray
-    }
-}
-
 
 
 /* HELPER FUNCTIONS */

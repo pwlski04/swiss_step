@@ -8,6 +8,8 @@ import java.io.File
 
 
 
+// OLD
+
 private const val WALKED_SEGMENTS_FILE = "walked_segments.json"
 
 
