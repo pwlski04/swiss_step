@@ -24,6 +24,8 @@ class HomeState(
     val lifecycleOwner: LifecycleOwner,
     val locationMarker: LocationMarker,
     val permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
+    val pathStorage: PathStorage,
+    val pathOverlayLayer: PathOverlayLayer,
     initialIsDrawing: Boolean
 ) {
     // DEFAULT (no values in state): by remember {x} => by x
@@ -42,16 +44,10 @@ class HomeState(
         get() = TrackingLiveState.latestPoint.value
     val liveMovementType
         get() = TrackingLiveState.movementType.value
-
-    // Chain rendering (create once)
-    val pathStorage = PathStorage()
-    val pathOverlayLayer = PathOverlayLayer(pathStorage).also {
-        pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
-    }
 }
 
 @Composable
-fun RememberHomeState(context: Context): HomeState{
+fun RememberHomeState(context: Context, pathStorage: PathStorage, pathOverlayLayer: PathOverlayLayer): HomeState{
     // state with values => move to state, pass values as arguments to HomeState
     val lifecycleOwner = LocalLifecycleOwner.current
     var rememberedHasLocationPermission by remember{ mutableStateOf(false) }
@@ -64,7 +60,7 @@ fun RememberHomeState(context: Context): HomeState{
 
     val state = remember {
         HomeState(
-            lifecycleOwner, LocationMarker(), permissionLauncher, loadIsDrawing(context)
+            lifecycleOwner, LocationMarker(), permissionLauncher, pathStorage, pathOverlayLayer, loadIsDrawing(context)
         )
     }
 

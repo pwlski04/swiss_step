@@ -16,26 +16,21 @@ fun OfflineMapScreen(
     modifier: Modifier = Modifier,
     mapFilePath: String,
     themeFilePath: String,
+    existingMapView: MapView?,
     onMapReady: (MapView) -> Unit
 ) {
     val context = LocalContext.current
 
-    val mapView = remember(mapFilePath, themeFilePath) {
-        createMapView(context, mapFilePath, themeFilePath)
+    val mapView = remember(existingMapView) {
+        existingMapView ?: createMapView(context, mapFilePath, themeFilePath)
     }
 
     LaunchedEffect(mapView) {
         onMapReady(mapView)
     }
 
-    DisposableEffect(mapView) {
-        onDispose {
-            mapView.destroyAll()
-        }
-    }
-
     AndroidView(
-        modifier = modifier.fillMaxSize(),
-        factory = { mapView }
+        factory = { mapView },
+        modifier = modifier.fillMaxSize()
     )
 }

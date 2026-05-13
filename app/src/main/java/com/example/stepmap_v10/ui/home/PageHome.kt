@@ -21,6 +21,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 import androidx.compose.ui.text.style.TextAlign
+import com.example.stepMap_v10.chains.PathOverlayLayer
+import com.example.stepMap_v10.chains.PathStorage
 
 import org.mapsforge.core.model.LatLong
 
@@ -28,7 +30,8 @@ import org.mapsforge.core.model.LatLong
 /*
 TODO:
 - to fix:
-    - switching pages removes paths & quickly switching between pages crashes the app
+    - quickly switching between pages crashes the app
+    - should not draw still paths
 - experience
     - save paths under a name when resetting to reuse later
     - improve map boundaries
@@ -39,8 +42,12 @@ TODO:
  */
 
 @Composable
-fun Page_Home(context: Context) {
-    val state = RememberHomeState(context)
+fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: PathOverlayLayer, sharedMapView: MutableState<MapView?>) {
+    val state = RememberHomeState(context, pathStorage, pathOverlayLayer)
+
+    LaunchedEffect(sharedMapView.value) {
+        state.mapView = sharedMapView.value
+    }
 
     with(state) { // To not have to write state.xyz everywhere
         HomeEffects(
@@ -50,8 +57,8 @@ fun Page_Home(context: Context) {
             mapView = mapView,
             allPaths = allPaths,
 
-            pathStorage = pathStorage,           // ← new
-            pathOverlayLayer = pathOverlayLayer, // ← new
+            pathStorage = state.pathStorage,           // ← new
+            pathOverlayLayer = state.pathOverlayLayer, // ← new
 
             isDrawing = isDrawing,
             latestLivePoint = latestLivePoint,
@@ -91,9 +98,13 @@ fun Page_Home(context: Context) {
                             modifier = Modifier.fillMaxSize(),
                             mapFilePath = mapFilePath!!,
                             themeFilePath = themeFilePath!!,
+                            existingMapView = sharedMapView.value,
                             onMapReady = { readyMapView: MapView ->
-                                mapView = readyMapView
-                                readyMapView.layerManager.redrawLayers()
+                                /*mapView = readyMapView
+                                readyMapView.layerManager.redrawLayers()*/
+                                if (sharedMapView.value == null) {
+                                    sharedMapView.value = readyMapView
+                                }
                             }
                         )
                     }

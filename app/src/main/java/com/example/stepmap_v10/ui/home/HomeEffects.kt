@@ -119,7 +119,7 @@ fun HomeEffects(
             val dist = pointToSegmentDistance(LatLong(point.lat, point.lon), nearest)
 
             if (dist < 0.0003) {
-                pathStorage.onGpsPoint(nearest, liveMovementType)
+                pathStorage.onGpsPoint(nearest, liveMovementType, index)
                 mv.layerManager.redrawLayers()
             }
         }

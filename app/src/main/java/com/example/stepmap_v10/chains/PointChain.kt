@@ -1,7 +1,9 @@
 package com.example.stepMap_v10.chains
 
 import com.example.stepMap_v10.paths.Segment
+import com.example.stepMap_v10.paths.SegmentIndex
 import com.example.stepMap_v10.paths.colorForMovementType
+import com.example.stepMap_v10.paths.pointToSegmentDistance
 import com.example.stepMap_v10.paths.strokeWidthComputer
 import com.example.stepMap_v10.tracking.MovementType
 import org.mapsforge.core.graphics.Canvas
@@ -43,7 +45,8 @@ data class LiveTail(
     /* Saves the most recent tail during live tracking */
     val point: LatLong,
     val chain: PathChain,
-    val timestamp: Long  // System.currentTimeMillis()
+    val timestamp: Long,  // System.currentTimeMillis()
+    val lastSegment: Segment?
 )
 
 
@@ -176,6 +179,10 @@ class PathStorage () {
 
     var onChainRemoved: ((Long) -> Unit)? = null        // (*)
 
+    private val CONTINUITY_SEARCH_RADIUS = 3       // connected hops to search
+    private val DRIFT_REJECT_DISTANCE = 0.0004     // ~40m: farther = likely drift
+    private val MAX_CONTINUITY_DISTANCE = 0.0008   // ~80m: give up continuity beyond this
+
 
     /* Save a segment */
     fun recordSegment(segment: Segment, movementType: MovementType): PathChain {
@@ -255,37 +262,64 @@ class PathStorage () {
     - DIFFERENCE TO CURRENT: CURRENT ONLY BRIDGES DURING SESSION END, WHAT ABOUT LIVE TRACING GAPS?
     - CHALLENGE: BRIDGE HOW?
     */
-    fun onGpsPoint(segment: Segment, movementType: MovementType) {
+    fun onGpsPoint(segment: Segment, movementType: MovementType, index: SegmentIndex) {
         val segStart = segment.startingPoint
         val segEnd   = segment.endingPoint
         val now = System.currentTimeMillis()
         val tail = liveTails[movementType]
 
+        val bestSegment =
+            if (tail?.lastSegment != null && now -tail.timestamp < LIVE_GAP_THRESHOLD_MS){
+                findBestConnectedSegment(segStart, tail.lastSegment!!, index)
+            } else {
+                segment
+            }
+
+        if (bestSegment == null) return
+
+        val bestStart = bestSegment.startingPoint
+        val bestEnd = bestSegment.endingPoint
+
         when {
-            // No tail yet → record normally, set tail to segment end
-            tail == null -> {
-                val affectedChain = recordSegment(segment, movementType)
-                liveTails[movementType] = LiveTail(segEnd, affectedChain, now)
+            // Set tail to best segment end
+            tail == null || now - tail.timestamp > LIVE_GAP_THRESHOLD_MS || tail.point.distanceTo(bestStart) > LIVE_GAP_THRESHOLD_DEGREES -> {
+                val affectedChain = recordSegment(bestSegment, movementType)
+                liveTails[movementType] = LiveTail(bestEnd, affectedChain, now, bestSegment)
             }
-
-            // Tail is stale (too old or too far) → start fresh chain
-            now - tail.timestamp > LIVE_GAP_THRESHOLD_MS || tail.point.distanceTo(segStart) > LIVE_GAP_THRESHOLD_DEGREES -> {
-                val affectedChain = recordSegment(segment, movementType)
-                liveTails[movementType] = LiveTail(segEnd, affectedChain, now)
-            }
-
             // Tail is close and recent → bridge the gap directly
             else -> {
                 // Append bridge point + new segment end onto the live chain
-                if (tail.point.distanceTo(segStart) > 0.00001) {
-                    tail.chain.points.addLast(segStart)  // bridge
+                if (tail.point.distanceTo(bestStart) > 0.00001) {
+                    tail.chain.points.addLast(bestStart)  // bridge
                 }
-                tail.chain.points.addLast(segEnd)
+                tail.chain.points.addLast(bestEnd)
                 tail.chain.dirty = true
                 modifiedMovementTypes.add(movementType)
-                liveTails[movementType] = LiveTail(segEnd, tail.chain, now)
+                liveTails[movementType] = LiveTail(bestEnd, tail.chain, now, bestSegment)
             }
         }
+    }
+
+    private fun findBestConnectedSegment(gpsPoint: LatLong, lastSegment: Segment, index: SegmentIndex): Segment? {
+        val visited = mutableSetOf<Segment>()
+        var frontier = listOf(lastSegment)
+        val options = mutableListOf<Segment>()
+
+        repeat(CONTINUITY_SEARCH_RADIUS){
+            val next = mutableListOf<Segment>()
+            for (segment in frontier){
+                if (!visited.add(segment)) continue
+                options.add(segment)
+                next += index.connectedSegments(segment)
+            }
+            frontier = next
+        }
+
+        val best = options.minByOrNull { pointToSegmentDistance(gpsPoint, it) } ?: return null
+        val dist = pointToSegmentDistance(gpsPoint, best)
+
+
+        return if (dist < MAX_CONTINUITY_DISTANCE) best else null
     }
 
 
