@@ -14,20 +14,14 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.stepMap_v10.chains.PathOverlayLayer
 import com.example.stepMap_v10.chains.PathStorage
-import com.example.stepMap_v10.paths.LastMatchedPosition
-import com.example.stepMap_v10.map.LocalProjector
 import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepMap_v10.paths.Path
-import com.example.stepMap_v10.paths.loadWalkedSegments
-import com.example.stepMap_v10.tracking.MovementType
 import com.example.stepMap_v10.tracking.TrackingLiveState
 import com.example.stepMap_v10.tracking.loadIsDrawing
 import org.mapsforge.map.android.view.MapView
 
 class HomeState(
     val lifecycleOwner: LifecycleOwner,
-    val walkedSegments: MutableMap<String, MovementType>,
-    val projector: LocalProjector,
     val locationMarker: LocationMarker,
     val permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
     initialIsDrawing: Boolean
@@ -42,8 +36,6 @@ class HomeState(
     var allPaths by mutableStateOf<List<Path>>(emptyList())
 
     var isDrawing by mutableStateOf(initialIsDrawing)
-
-    var lastMatchedPosition by mutableStateOf<LastMatchedPosition?>(null)
 
     // GET (no state): x = y => x get() = y
     val latestLivePoint
@@ -72,7 +64,7 @@ fun RememberHomeState(context: Context): HomeState{
 
     val state = remember {
         HomeState(
-            lifecycleOwner, loadWalkedSegments(context), LocalProjector(originLat = 47.3769), LocationMarker(), permissionLauncher, loadIsDrawing(context)
+            lifecycleOwner, LocationMarker(), permissionLauncher, loadIsDrawing(context)
         )
     }
 

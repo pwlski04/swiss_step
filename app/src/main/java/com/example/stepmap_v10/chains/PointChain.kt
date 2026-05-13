@@ -13,7 +13,6 @@ import org.mapsforge.core.model.Rotation
 import org.mapsforge.core.util.MercatorProjection
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.layer.Layer
-import kotlin.collections.remove
 
 
 /* INITIALIZATION

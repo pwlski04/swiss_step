@@ -57,16 +57,13 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
     require(themeFile.length() > 0L) { "Theme file is empty: $themeFilePath" }
 
     try {
-        tileRendererLayer.setXmlRenderTheme(ExternalRenderTheme(File(themeFilePath)))
+        tileRendererLayer.setXmlRenderTheme(ExternalRenderTheme(themeFile))
     } catch (e: Exception) {
         e.printStackTrace()
         tileRendererLayer.setXmlRenderTheme(MapsforgeThemes.DEFAULT)
     }
 
     mapView.layerManager.layers.add(tileRendererLayer)
-
-    val travelOverlay = PathOverlayLayer(travelStore) // travelStore is the routes that were walked => data to be rendered
-    mapView.layerManager.layers.add(travelOverlay)
 
     mapView.setZoomLevelMin(13.toByte())
     mapView.setZoomLevelMax(20.toByte())

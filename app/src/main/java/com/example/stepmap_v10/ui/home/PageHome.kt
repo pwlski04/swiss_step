@@ -28,10 +28,7 @@ import org.mapsforge.core.model.LatLong
 /*
 TODO:
 - to fix:
-    - background tracking doesn't draw paths
-    - instead of closest segment -> all segments in a radius
-    - quickly switching between pages crashes the app
-    - location marker is under the paths while drawing
+    - switching pages removes paths & quickly switching between pages crashes the app
 - experience
     - save paths under a name when resetting to reuse later
     - improve map boundaries
@@ -42,7 +39,7 @@ TODO:
  */
 
 @Composable
-fun Page_Home(context: Context, pathWidth: Float) {
+fun Page_Home(context: Context) {
     val state = RememberHomeState(context)
 
     with(state) { // To not have to write state.xyz everywhere

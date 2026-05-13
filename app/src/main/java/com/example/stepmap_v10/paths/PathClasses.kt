@@ -38,10 +38,3 @@ data class PathPoint (
     val sessionId: Long,
     val movementType: MovementType
 )
-
-
-data class LastMatchedPosition(
-    val pathId: Long,
-    val segmentIndex: Int,
-    val progress: Double
-)
