@@ -16,27 +16,24 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.stepMap_v10.chains.PathOverlayLayer
 import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepMap_v10.map.applySmoothMapForceField
-import com.example.stepMap_v10.map.copyAssetToInternalStorage
-import com.example.stepMap_v10.paths.Path
 import com.example.stepMap_v10.paths.PathPoint
-import com.example.stepMap_v10.paths.loadPathsFromGeoJson
 import com.example.stepMap_v10.paths.SegmentIndex
 import com.example.stepMap_v10.paths.findNearestSegment
 import com.example.stepMap_v10.paths.pointToSegmentDistance
 import com.example.stepMap_v10.tracking.LocationTrackingService
 import com.example.stepMap_v10.tracking.MovementType
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import org.mapsforge.map.android.view.MapView
 
-import com.example.stepMap_v10.paths.toSegments
 import org.mapsforge.core.model.LatLong
 
 import com.example.stepMap_v10.chains.PathStorage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 
 @Composable
@@ -45,10 +42,11 @@ fun HomeEffects(
     lifecycleOwner: LifecycleOwner,
 
     mapView: MapView?,
-    allPaths: List<Path>,
+    viewModel: HomeViewModel,
 
     pathStorage: PathStorage,
     pathOverlayLayer: PathOverlayLayer,
+    segmentIndex: SegmentIndex?,
 
     isDrawing: Boolean,
     latestLivePoint: PathPoint?,
@@ -59,12 +57,10 @@ fun HomeEffects(
     hasLocationPermission: Boolean,
     onLocationPermissionChange: (Boolean) -> Unit,
 
-    onMapFilesLoaded: (mapPath: String, themePath: String) -> Unit,
-    onPathsLoaded: (List<Path>) -> Unit,
     onError: (String) -> Unit,
-    ){
-    var segmentIndex by remember { mutableStateOf<SegmentIndex?>(null) }
 
+    onMapViewReady: (MapView) -> Unit,
+    ){
     /* START TRACKING WHEN LOCATION PERMISSION IS GRANTED */
     /* STOP TRACKING WHEN LOCATION PERMISSION IS REVOKED, OR ON DISPOSE && NOT DRAWING */
     LaunchedEffect(hasLocationPermission) {
@@ -89,15 +85,17 @@ fun HomeEffects(
         }
     }
 
+    // Permission check
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        onLocationPermissionChange(granted)
+        if (!granted) permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
     /* UPDATE LOCATION MARKER WHEN CURRENT LOCATION MOVES */
     /* UPDATE PATH WITH LOCATION MARKER IF DRAWING IS ON */
-    LaunchedEffect(allPaths) {
-        if (allPaths.isNotEmpty()) {
-            segmentIndex = withContext(Dispatchers.Default) {
-                SegmentIndex(allPaths.toSegments())
-            }
-        }
-    }
 
     LaunchedEffect(mapView) {
         val mv = mapView ?: return@LaunchedEffect
@@ -118,9 +116,29 @@ fun HomeEffects(
             val nearest = findNearestSegment(point.lat, point.lon, index) ?: return@LaunchedEffect
             val dist = pointToSegmentDistance(LatLong(point.lat, point.lon), nearest)
 
-            if (dist < 0.0003) {
+            /*if (dist < 0.0003) {
                 pathStorage.onGpsPoint(nearest, liveMovementType, index)
+                viewModel.scheduleSaveChains()      //TODO: evaluate whether changing to saveChainsNow() is more effective
                 mv.layerManager.redrawLayers()
+            }*/
+
+            if (dist < 0.0003) {
+                try {
+                    val before = pathStorage.totalPointCount()
+
+                    pathStorage.onGpsPoint(nearest, liveMovementType, index)
+
+                    val after = pathStorage.totalPointCount()
+
+                    if (after != before) {
+                        //viewModel.scheduleSaveChains()
+                    }
+
+                    mv.layerManager.redrawLayers()
+
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
@@ -128,7 +146,10 @@ fun HomeEffects(
     var wasDrawing by remember { mutableStateOf(false) }
     LaunchedEffect(isDrawing) {
         if (wasDrawing && !isDrawing) {
-            pathStorage.finalizeSession()
+            withContext(Dispatchers.Default) {
+                pathStorage.finalizeSession()
+            }
+            viewModel.saveChainsNow()
             mapView?.layerManager?.redrawLayers()
         }
         wasDrawing = isDrawing
@@ -144,26 +165,6 @@ fun HomeEffects(
             }
 
             delay(16L)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        val granted = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        onLocationPermissionChange(granted)
-        if (!granted) permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-
-        try {
-            val (mapPath, themePath) = withContext(Dispatchers.IO) {
-                copyAssetToInternalStorage(context, "zurich.map") to
-                        copyAssetToInternalStorage(context, "minmap.xml")
-            }
-            onMapFilesLoaded(mapPath, themePath)
-            val loadedPaths = withContext(Dispatchers.IO) { loadPathsFromGeoJson(context) }
-            onPathsLoaded(loadedPaths)
-        } catch (e: Exception) {
-            onError("${e::class.java.simpleName}: ${e.message}")
         }
     }
 

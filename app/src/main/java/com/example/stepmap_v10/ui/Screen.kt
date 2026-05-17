@@ -23,8 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -34,27 +33,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.stepMap_v10.chains.PathOverlayLayer
-import com.example.stepMap_v10.chains.PathStorage
+import com.example.stepMap_v10.ui.home.HomeViewModel
 import com.example.stepMap_v10.ui.preferences.Page_Preferences
 import com.example.stepMap_v10.ui.home.Page_Home
-import org.mapsforge.map.android.view.MapView
 
 
 @Preview(showBackground = true)
 @Composable
 fun Screen() {
     val context = LocalContext.current
+    val viewModel: HomeViewModel = viewModel()
     var page by rememberSaveable { mutableIntStateOf(0) }
-
-    // Created once, survive page switches
-    val pathStorage = remember { PathStorage() }
-    val pathOverlayLayer = remember {
-        PathOverlayLayer(pathStorage).also {
-            pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
-        }
-    }
-    val sharedMapView = remember { mutableStateOf<MapView?>(null) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(), bottomBar = {
@@ -69,14 +58,9 @@ fun Screen() {
                 .padding(innerPadding)
         ) {
             when (page) {
-                0 -> Page_Home(context, pathStorage, pathOverlayLayer, sharedMapView)
-                1 -> Page_Preferences(
-                    /*pathWidth = pathWidth,
-                    onPathWidthChange = { newWidth ->
-                        pathWidth = newWidth
-                        savePathWidth(context, width = newWidth)
-                    }*/)
-                else -> Page_Home(context, pathStorage, pathOverlayLayer, sharedMapView)
+                0 -> Page_Home(context, viewModel)
+                1 -> Page_Preferences()
+                else -> Page_Home(context, viewModel)
             }
         }
     }

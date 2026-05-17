@@ -15,13 +15,13 @@ import org.mapsforge.core.model.Rotation
 import org.mapsforge.core.util.MercatorProjection
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.layer.Layer
-
-
-/* INITIALIZATION
-val pathStorage = PathStorage()
-val overlayLayer = PathOverlayLayer(pathStorage)
-pathStorage.onChainRemoved = { id -> overlayLayer.evictFromCache(id) }
- */
+import kotlinx.serialization.Serializable
+import android.content.Context
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.decodeFromString
 
 /* DATA CLASSES */
 
@@ -33,14 +33,6 @@ data class PathChain(
     var dirty: Boolean = true
 )
 
-data class ChainEndpoint(
-    /* To save both ends of the chain */
-    val chain: PathChain,
-    val isHead: Boolean
-) {
-    val point get() = if (isHead) chain.points.first() else chain.points.last()
-}
-
 data class LiveTail(
     /* Saves the most recent tail during live tracking */
     val point: LatLong,
@@ -49,19 +41,43 @@ data class LiveTail(
     val lastSegment: Segment?
 )
 
+@Serializable
+data class StoredChainCollection(
+    val entries: List<StoredMovementEntry>
+)
+
+@Serializable
+data class StoredMovementEntry(
+    val movementType: MovementType,
+    val chains: List<StoredPathChain>
+)
+
+@Serializable
+data class StoredPathChain(
+    val id: Long,
+    val movementType: MovementType,
+    val points: List<StoredPoint>
+)
+
+@Serializable
+data class StoredPoint(
+    val lat: Double,
+    val lon: Double
+)
+
 
 /* OVERLAY => Rendered over base map */
 
 class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
     private val paintCache = HashMap<Pair<MovementType, Byte>, Paint>()
-    private val projectionCache = HashMap<Long, HashMap<Byte, List<Pair<Double, Double>>>>()        // Cache of pre-projected points per chain per zoom level
+    private val projectionCache = ConcurrentHashMap<Long, HashMap<Byte, List<Pair<Double, Double>>>>()        // Cache of pre-projected points per chain per zoom level
 
     override fun draw(boundingBox: BoundingBox, zoomLevel: Byte, canvas: Canvas, topLeftPoint: Point, rotation: Rotation) {
         val w = canvas.width.toDouble()
         val h = canvas.height.toDouble()
 
         for (movementType in DRAW_ORDER) {      // (1)
-            val chains = pathStorage.chains[movementType] ?: continue
+            val chains = pathStorage.chains[movementType]?.toList() ?: continue
             if (chains.isEmpty()) continue
             val paint = getPaint(movementType, zoomLevel)       // (2)
 
@@ -70,10 +86,9 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
                 if (chain.dirty || !zoomCache.containsKey(zoomLevel)){
                     zoomCache.clear()
                     zoomCache[zoomLevel] = projectChain(chain, zoomLevel)       // (3)
-                    chain.dirty = false
+                    //chain.dirty = false
                 }
 
-                //drawChain(chain, canvas, topLeftPoint, zoomLevel, paint, boundingBox)
                 drawProjectedChain(zoomCache[zoomLevel]!!, topLeftPoint, canvas, paint, w, h)       // Uses the cache
             }
         }
@@ -91,34 +106,6 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
             val y2 = by - topLeftPoint.y
 
             if (!segmentIntersectsViewport(x1, y1, x2, y2, w, h)) continue
-
-            canvas.drawLine(x1.toInt(), y1.toInt(),x2.toInt(), y2.toInt(),paint)
-        }
-    }
-
-    private fun drawChain(chain: PathChain, canvas: Canvas, topLeftPoint: Point, zoomLevel: Byte, paint: Paint, boundingBox: BoundingBox) {
-        val points = chain.points
-        if (points.size < 2) return
-
-        val tileSize = displayModel.tileSize
-        val mapSize = MercatorProjection.getMapSize(zoomLevel, tileSize)
-
-        // Pre-convert all points to screen coordinates (Double) by 1. projecting and 2. subtracting topLeftPoint
-        val screenPoints = points.map { latLong ->
-            val pixelX = MercatorProjection.longitudeToPixelX(latLong.longitude, mapSize)
-            val pixelY = MercatorProjection.latitudeToPixelY(latLong.latitude, mapSize)
-            Pair(pixelX - topLeftPoint.x, pixelY - topLeftPoint.y)
-        }
-
-        val w = canvas.width.toDouble()
-        val h = canvas.height.toDouble()
-
-        for (i in 0 until screenPoints.size - 1) {
-            val (x1, y1) = screenPoints[i]
-            val (x2, y2) = screenPoints[i + 1]
-
-            // Skip fully offscreen segments
-            if (!segmentIntersectsViewport(x1, y1, x2, y2, w, h)) continue      // (4)
 
             canvas.drawLine(x1.toInt(), y1.toInt(),x2.toInt(), y2.toInt(),paint)
         }
@@ -151,7 +138,7 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
 
     private fun projectChain(chain: PathChain, zoomLevel: Byte): List<Pair<Double, Double>> {       // (4)
         val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
-        return chain.points.map { latLong ->
+        return chain.points.toList().map { latLong ->
             Pair(
                 MercatorProjection.longitudeToPixelX(latLong.longitude, mapSize),
                 MercatorProjection.latitudeToPixelY(latLong.latitude, mapSize)
@@ -183,8 +170,86 @@ class PathStorage () {
     private val DRIFT_REJECT_DISTANCE = 0.0004     // ~40m: farther = likely drift
     private val MAX_CONTINUITY_DISTANCE = 0.0008   // ~80m: give up continuity beyond this
 
+    /* Store and restore chains */
+    private val FILE_NAME = "walked_chains.json"
+
+    private val json = Json {prettyPrint = false; ignoreUnknownKeys = true }
+
+    var onChainsChanged: (() -> Unit)? = null
+
+
+    @Synchronized
+    fun save(context: Context) {
+        val collection = StoredChainCollection(
+            entries = chains.entries.map { (movementType, list) ->
+                StoredMovementEntry(
+                    movementType = movementType,
+                    chains = list.map { chain ->
+                        StoredPathChain(
+                            id = chain.id,
+                            movementType = chain.movementType,
+                            points = chain.points.map { StoredPoint(it.latitude, it.longitude) }
+                        )
+                    }
+                )
+            }
+        )
+
+        val text = json.encodeToString(collection)
+        val file = File(context.filesDir, FILE_NAME)
+        val tempFile = File(context.filesDir, "$FILE_NAME.tmp")
+        tempFile.writeText(text)
+        if (file.exists()) file.delete()
+        tempFile.renameTo(file)
+    }
+
+    @Synchronized
+    fun load(context: Context) {
+        val file = File(context.filesDir, FILE_NAME)
+        if (!file.exists()) return
+
+        try {
+            val text = file.readText()
+            val collection = json.decodeFromString<StoredChainCollection>(text)
+
+            clearSegments()
+
+            for (entry in collection.entries) {
+                chains[entry.movementType]?.addAll(
+                    entry.chains.map { stored ->
+                        PathChain(
+                            id = stored.id,
+                            movementType = stored.movementType,
+                            points = ArrayDeque(stored.points.map { LatLong(it.lat, it.lon) }),
+                            dirty = true
+                        )
+                    }
+                )
+            }
+
+            nextChainId = chains.values.flatten().maxOfOrNull { it.id + 1 } ?: 0L
+            onChainsChanged?.invoke()
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Corrupt file — delete and start fresh
+            deleteSaved(context)
+        }
+    }
+
+    fun deleteSaved(context: Context) {
+        File(context.filesDir, FILE_NAME).delete()
+        File(context.filesDir, "$FILE_NAME.tmp").delete()
+    }
+
+    private fun emptyChains(): MutableMap<MovementType, MutableList<PathChain>> {
+        return MovementType.entries
+            .associateWith { mutableListOf<PathChain>() }
+            .toMutableMap()
+    }
 
     /* Save a segment */
+    @Synchronized
     fun recordSegment(segment: Segment, movementType: MovementType): PathChain {
         val movementChains = chains[movementType]!!
         val segStart = segment.startingPoint
@@ -208,14 +273,13 @@ class PathStorage () {
         }
 
         modifiedMovementTypes.add(movementType)
-
+        onChainsChanged?.invoke()
         return when {
             // Case 1: Both ends connect two different chains -> merge them
             headChain != null && tailChain != null && headChain !== tailChain -> {
                 headChain.points.addLast(if (headIsReversed) segStart else segEnd)
                 headChain.dirty = true
-                val tailPoints = if (tailIsReversed) tailChain.points.reversed()
-                else tailChain.points.toList()
+                val tailPoints = if (tailIsReversed) tailChain.points.reversed()  else tailChain.points.toList()
                 tailPoints.forEach { headChain.points.addLast(it) }
                 movementChains.remove(tailChain)
                 onChainRemoved?.invoke(tailChain.id)
@@ -253,15 +317,22 @@ class PathStorage () {
 
         modifiedMovementTypes.clear()
         liveTails.clear()
+        onChainsChanged?.invoke()
     }
 
+    fun isEmpty(): Boolean {
+        return MovementType.entries.all { movementType ->
+            chains[movementType].isNullOrEmpty()
+        }
+    }
 
     /*
-    NEW IDEA FOR CONTINUOUS DRAWING:
+    FOR CONTINUOUS DRAWING:
     ALWAYS STORE THE LAST POINT WITH ACCESS TIME (IS THE TAIL OF THE CURRENT PATH); THEN COMPARE DISTANCE AND TIME TO CURRENT POINT (WITH CUTOFF) => IF CLOSE ENOUGH BRIDGE (NEW BECOMES NEW TAIL)
     - DIFFERENCE TO CURRENT: CURRENT ONLY BRIDGES DURING SESSION END, WHAT ABOUT LIVE TRACING GAPS?
     - CHALLENGE: BRIDGE HOW?
     */
+    @Synchronized
     fun onGpsPoint(segment: Segment, movementType: MovementType, index: SegmentIndex) {
         val segStart = segment.startingPoint
         val segEnd   = segment.endingPoint
@@ -288,6 +359,7 @@ class PathStorage () {
             }
             // Tail is close and recent → bridge the gap directly
             else -> {
+                /*
                 // Append bridge point + new segment end onto the live chain
                 if (tail.point.distanceTo(bestStart) > 0.00001) {
                     tail.chain.points.addLast(bestStart)  // bridge
@@ -296,6 +368,29 @@ class PathStorage () {
                 tail.chain.dirty = true
                 modifiedMovementTypes.add(movementType)
                 liveTails[movementType] = LiveTail(bestEnd, tail.chain, now, bestSegment)
+                onChainsChanged?.invoke()
+                 */
+                val appendStart = tail.point.distanceTo(bestStart) <= tail.point.distanceTo(bestEnd)
+
+                if (appendStart) {
+                    // Approaching from start side → append start then end
+                    if (tail.point.distanceTo(bestStart) > 0.00001) {
+                        tail.chain.points.addLast(bestStart)
+                    }
+                    tail.chain.points.addLast(bestEnd)
+                    liveTails[movementType] = LiveTail(bestEnd, tail.chain, now, bestSegment)
+                } else {
+                    // Approaching from end side → append end then start (reversed)
+                    if (tail.point.distanceTo(bestEnd) > 0.00001) {
+                        tail.chain.points.addLast(bestEnd)
+                    }
+                    tail.chain.points.addLast(bestStart)
+                    liveTails[movementType] = LiveTail(bestStart, tail.chain, now, bestSegment)
+                }
+
+                tail.chain.dirty = true
+                modifiedMovementTypes.add(movementType)
+                onChainsChanged?.invoke()
             }
         }
     }
@@ -324,6 +419,7 @@ class PathStorage () {
 
 
     /* At the end of a session */
+    @Synchronized
     fun finalizeSession(){
         for (movementType in modifiedMovementTypes){     // TODO: Call for each MODIFIED MovementType
             runFinalization(movementType)
@@ -340,6 +436,19 @@ class PathStorage () {
 
 
     /* HELPERS */
+    private fun mergeWithOverlapCheck(chainA: PathChain, chainB: PathChain, thresholdDegrees: Double = 0.00005) {       // (2): Append chainB onto chainA, skipping leading points that overlap chainA's tail
+        val aEnd = chainA.points.last()
+        var startIndex = 0
+        // Skip points in B that are still "on top of" A's last point
+        for (i in chainB.points.indices) {
+            if (chainB.points[i].distanceTo(aEnd) < thresholdDegrees) startIndex = i + 1
+            else break
+        }
+        for (i in startIndex until chainB.points.size) {
+            chainA.points.addLast(chainB.points[i])
+        }
+    }
+
     fun runGapMerge(movementType: MovementType) {       // (1): Full gap merge with overlap + reversal handling
         val chainList = chains[movementType]!!
         if (chainList.size < 2) return
@@ -406,7 +515,7 @@ class PathStorage () {
                     }
                     // a's tail matched b's tail → flip b then append
                     isTailMatch && !matchingEndpoint.isHead -> {
-                        val flipped = PathChain(b.id, b.movementType,ArrayDeque(b.points.reversed()))
+                        val flipped = PathChain(b.id, b.movementType,ArrayDeque(b.points.reversed()), dirty = true)
                         mergeWithOverlapCheck(a, flipped, threshold)
                         chainList.remove(b)
                         onChainRemoved?.invoke(b.id)
@@ -421,7 +530,7 @@ class PathStorage () {
                     }
                     // a's head matched b's head → flip a then append onto b
                     !isTailMatch && matchingEndpoint.isHead -> {
-                        val flipped = PathChain(a.id, a.movementType,ArrayDeque(a.points.reversed()))
+                        val flipped = PathChain(a.id, a.movementType,ArrayDeque(a.points.reversed()), dirty = true)
                         mergeWithOverlapCheck(b, flipped, threshold)
                         chainList.remove(a)
                         onChainRemoved?.invoke(a.id)
@@ -435,16 +544,9 @@ class PathStorage () {
         }
     }
 
-    private fun mergeWithOverlapCheck(chainA: PathChain, chainB: PathChain, thresholdDegrees: Double = 0.00005) {       // (2): Append chainB onto chainA, skipping leading points that overlap chainA's tail
-        val aEnd = chainA.points.last()
-        var startIndex = 0
-        // Skip points in B that are still "on top of" A's last point
-        for (i in chainB.points.indices) {
-            if (chainB.points[i].distanceTo(aEnd) < thresholdDegrees) startIndex = i + 1
-            else break
-        }
-        for (i in startIndex until chainB.points.size) {
-            chainA.points.addLast(chainB.points[i])
+    fun totalPointCount(): Int {
+        return chains.values.sumOf { chainList ->
+            chainList.sumOf { chain -> chain.points.size }
         }
     }
 }

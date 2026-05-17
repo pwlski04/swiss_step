@@ -30,7 +30,9 @@ import org.mapsforge.core.model.LatLong
 /*
 TODO:
 - to fix:
-    - quickly switching between pages crashes the app
+    - DONE: quickly switching between pages crashes the app
+    - DONE: trash icon should disappear if there are no paths to delete
+    - location marker is huge while zooming in
     - should not draw still paths
 - experience
     - save paths under a name when resetting to reuse later
@@ -42,23 +44,20 @@ TODO:
  */
 
 @Composable
-fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: PathOverlayLayer, sharedMapView: MutableState<MapView?>) {
-    val state = RememberHomeState(context, pathStorage, pathOverlayLayer)
-
-    LaunchedEffect(sharedMapView.value) {
-        state.mapView = sharedMapView.value
-    }
+fun Page_Home(context: Context, viewModel: HomeViewModel) {
+    val state = RememberHomeState(context, viewModel)
 
     with(state) { // To not have to write state.xyz everywhere
         HomeEffects(
             context = context,
             lifecycleOwner = state.lifecycleOwner,
 
-            mapView = mapView,
-            allPaths = allPaths,
+            mapView = viewModel.sharedMapView,
+            viewModel = viewModel,
 
-            pathStorage = state.pathStorage,           // ← new
-            pathOverlayLayer = state.pathOverlayLayer, // ← new
+            pathStorage = viewModel.pathStorage,
+            pathOverlayLayer = viewModel.pathOverlayLayer,
+            segmentIndex = viewModel.segmentIndex,
 
             isDrawing = isDrawing,
             latestLivePoint = latestLivePoint,
@@ -69,21 +68,20 @@ fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: Path
             hasLocationPermission = hasLocationPermission,
             onLocationPermissionChange = { granted -> hasLocationPermission = granted },
 
-            onMapFilesLoaded = { mapPath, themePath ->
-                mapFilePath = mapPath
-                themeFilePath = themePath
-            },
-            onPathsLoaded = { loadedPaths -> allPaths = loadedPaths },
-            onError = { message -> errorMessage = message }
+            onError = { message -> errorMessage = message },
+
+            onMapViewReady = { readyMapView ->
+                if (viewModel.sharedMapView == null) {
+                    viewModel.sharedMapView = readyMapView
+                }
+            }
         )
 
         /* FRONTEND */
         Column(modifier = Modifier.fillMaxSize()) {
             when {
-                errorMessage != null -> Text("Map load error: $errorMessage")
-
-                mapFilePath == null || themeFilePath == null ->
-                    Text("Preparing offline map...")
+                viewModel.errorMessage != null -> Text("Map load error: ${viewModel.errorMessage}")
+                viewModel.mapFilePath == null || viewModel.themeFilePath == null -> Text("Preparing offline map...")
 
                 else -> Box(
                     modifier = Modifier.fillMaxSize()
@@ -96,14 +94,14 @@ fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: Path
                     } else {
                         OfflineMapScreen(
                             modifier = Modifier.fillMaxSize(),
-                            mapFilePath = mapFilePath!!,
-                            themeFilePath = themeFilePath!!,
-                            existingMapView = sharedMapView.value,
+                            mapFilePath = viewModel.mapFilePath!!,
+                            themeFilePath = viewModel.themeFilePath!!,
+                            existingMapView = viewModel.sharedMapView,
                             onMapReady = { readyMapView: MapView ->
                                 /*mapView = readyMapView
                                 readyMapView.layerManager.redrawLayers()*/
-                                if (sharedMapView.value == null) {
-                                    sharedMapView.value = readyMapView
+                                if (viewModel.sharedMapView == null) {
+                                    viewModel.sharedMapView = readyMapView
                                 }
                             }
                         )
@@ -118,7 +116,7 @@ fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: Path
                             .padding(top = 8.dp)
                     ) {
                         Text(
-                            text = liveMovementType.name + ", ZOOM: " + mapView?.model?.mapViewPosition?.zoomLevel?.toString(),
+                            text = liveMovementType.name + ", ZOOM: " + viewModel.sharedMapView?.model?.mapViewPosition?.zoomLevel?.toString(),
                             modifier = Modifier
                                 .width(160.dp)
                                 .padding(top = 16.dp, bottom = 16.dp),
@@ -153,12 +151,13 @@ fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: Path
                         }
 
 
-                        if (!isDrawing) {
+                        if (!isDrawing && viewModel.hasChains) {
                             Surface(
                                 //BUTTON: REMOVE HISTORY
                                 onClick = {
                                     state.pathStorage.clearSegments()
-                                    mapView?.layerManager?.redrawLayers()
+                                    viewModel.sharedMapView?.layerManager?.redrawLayers()
+                                    viewModel.deleteSavedChains()
                                 },
                                 shape = RoundedCornerShape(18.dp),
                                 tonalElevation = 6.dp,
@@ -185,7 +184,7 @@ fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: Path
                         Surface(
                             //BUTTON: RECENTER MAP
                             onClick = {
-                                val mv = mapView
+                                val mv = viewModel.sharedMapView
                                 val p = point
 
                                 if (mv != null && p != null) {
@@ -209,7 +208,7 @@ fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: Path
                         //BUTTON: ZOOM IN
                         Surface(
                             onClick = {
-                                mapView?.let { mv ->
+                                viewModel.sharedMapView?.let { mv ->
                                     val currentZoom = mv.model.mapViewPosition.zoomLevel
                                     mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
                                 }
@@ -229,7 +228,7 @@ fun Page_Home(context: Context, pathStorage: PathStorage, pathOverlayLayer: Path
                         //BUTTON: ZOOM OUT
                         Surface(
                             onClick = {
-                                mapView?.let { mv ->
+                                viewModel.sharedMapView?.let { mv ->
                                     val currentZoom = mv.model.mapViewPosition.zoomLevel
                                     mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
                                 }

@@ -1,8 +1,11 @@
 package com.example.stepMap_v10.tracking
 
 import android.location.Location
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
-enum class MovementType {STILL, WALKING, RUNNING, BIKING, TRANSPORT}
+@Serializable
+enum class MovementType { STILL, WALKING, RUNNING, BIKING, TRANSPORT }
 
 fun MovementType.slowRanking(): Int {
     return when (this){
@@ -14,13 +17,11 @@ fun MovementType.slowRanking(): Int {
     }
 }
 
-fun isSlowerThanOrEqual(newType: MovementType, oldType: MovementType): Boolean {
-    return newType.slowRanking() <= oldType.slowRanking()
-}
-
+@Serializable
 class MovementClassifier {
     /* TODO OPTIONAL: Use machine learning to classify movement */
 
+    @Transient
     private val recentSpeedsKmh = ArrayDeque<Float>()
 
     private var currentType: MovementType = MovementType.STILL

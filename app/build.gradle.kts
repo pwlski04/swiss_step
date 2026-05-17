@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -65,6 +66,8 @@ dependencies {
     implementation(libs.osmdroid.android)
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
     implementation("org.json:json:20240303")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 }

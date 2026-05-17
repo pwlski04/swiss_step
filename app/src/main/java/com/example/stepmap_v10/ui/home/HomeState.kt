@@ -28,14 +28,9 @@ class HomeState(
     val pathOverlayLayer: PathOverlayLayer,
     initialIsDrawing: Boolean
 ) {
-    // DEFAULT (no values in state): by remember {x} => by x
-    var mapFilePath by mutableStateOf<String?>(null)
-    var themeFilePath by mutableStateOf<String?>(null)
     var errorMessage by  mutableStateOf<String?>(null)
     var hasLocationPermission by  mutableStateOf(false)
     var mapView by mutableStateOf<MapView?>(null)
-
-    var allPaths by mutableStateOf<List<Path>>(emptyList())
 
     var isDrawing by mutableStateOf(initialIsDrawing)
 
@@ -47,7 +42,7 @@ class HomeState(
 }
 
 @Composable
-fun RememberHomeState(context: Context, pathStorage: PathStorage, pathOverlayLayer: PathOverlayLayer): HomeState{
+fun RememberHomeState(context: Context, viewModel: HomeViewModel): HomeState{
     // state with values => move to state, pass values as arguments to HomeState
     val lifecycleOwner = LocalLifecycleOwner.current
     var rememberedHasLocationPermission by remember{ mutableStateOf(false) }
@@ -60,7 +55,7 @@ fun RememberHomeState(context: Context, pathStorage: PathStorage, pathOverlayLay
 
     val state = remember {
         HomeState(
-            lifecycleOwner, LocationMarker(), permissionLauncher, pathStorage, pathOverlayLayer, loadIsDrawing(context)
+            lifecycleOwner, LocationMarker(), permissionLauncher, viewModel.pathStorage, viewModel.pathOverlayLayer, loadIsDrawing(context)
         )
     }
 
