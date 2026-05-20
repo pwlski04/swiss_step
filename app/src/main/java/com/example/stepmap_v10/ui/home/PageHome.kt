@@ -30,17 +30,13 @@ import org.mapsforge.core.model.LatLong
 /*
 TODO:
 - to fix:
-    - DONE: quickly switching between pages crashes the app
-    - DONE: trash icon should disappear if there are no paths to delete
-    - location marker is huge while zooming in
+    - pressing locator while scrolling map should stop movement
+    - location marker is huge while zooming in and
     - should not draw still paths
 - experience
     - save paths under a name when resetting to reuse later
     - improve map boundaries
     - more cities
-- code
-    - clean up code (oop, split up into files/directories)
-    - add good documentation
  */
 
 @Composable
@@ -62,7 +58,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             isDrawing = isDrawing,
             latestLivePoint = latestLivePoint,
             liveMovementType = liveMovementType,
-            locationMarker = locationMarker,
+            locationMarker = viewModel.locationMarker,
 
             permissionLauncher = permissionLauncher,
             hasLocationPermission = hasLocationPermission,

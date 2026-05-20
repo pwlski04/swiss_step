@@ -17,11 +17,12 @@ import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.layer.Layer
 import kotlinx.serialization.Serializable
 import android.content.Context
+import android.util.Log
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.serialization.decodeFromString
+
 
 /* DATA CLASSES */
 
@@ -107,6 +108,7 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
 
             if (!segmentIntersectsViewport(x1, y1, x2, y2, w, h)) continue
 
+            Log.d("StepByStep_v1.0_TAG", "Drawing line")
             canvas.drawLine(x1.toInt(), y1.toInt(),x2.toInt(), y2.toInt(),paint)
         }
     }

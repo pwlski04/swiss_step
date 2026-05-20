@@ -14,15 +14,16 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.stepMap_v10.chains.PathOverlayLayer
 import com.example.stepMap_v10.chains.PathStorage
-import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepMap_v10.paths.Path
+import com.example.stepMap_v10.paths.PathPoint
+import com.example.stepMap_v10.tracking.MovementType
 import com.example.stepMap_v10.tracking.TrackingLiveState
 import com.example.stepMap_v10.tracking.loadIsDrawing
 import org.mapsforge.map.android.view.MapView
+import androidx.compose.runtime.collectAsState
 
 class HomeState(
     val lifecycleOwner: LifecycleOwner,
-    val locationMarker: LocationMarker,
     val permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
     val pathStorage: PathStorage,
     val pathOverlayLayer: PathOverlayLayer,
@@ -34,11 +35,8 @@ class HomeState(
 
     var isDrawing by mutableStateOf(initialIsDrawing)
 
-    // GET (no state): x = y => x get() = y
-    val latestLivePoint
-        get() = TrackingLiveState.latestPoint.value
-    val liveMovementType
-        get() = TrackingLiveState.movementType.value
+    var latestLivePoint by mutableStateOf<PathPoint?>(null)
+    var liveMovementType by mutableStateOf(MovementType.STILL)
 }
 
 @Composable
@@ -55,9 +53,14 @@ fun RememberHomeState(context: Context, viewModel: HomeViewModel): HomeState{
 
     val state = remember {
         HomeState(
-            lifecycleOwner, LocationMarker(), permissionLauncher, viewModel.pathStorage, viewModel.pathOverlayLayer, loadIsDrawing(context)
+            lifecycleOwner, permissionLauncher, viewModel.pathStorage, viewModel.pathOverlayLayer, loadIsDrawing(context)
         )
     }
+
+    val latestPoint by TrackingLiveState.latestPoint.collectAsState()
+    val movementType by TrackingLiveState.movementType.collectAsState()
+    state.latestLivePoint = latestPoint
+    state.liveMovementType = movementType
 
     LaunchedEffect(rememberedHasLocationPermission) {
         state.hasLocationPermission = rememberedHasLocationPermission

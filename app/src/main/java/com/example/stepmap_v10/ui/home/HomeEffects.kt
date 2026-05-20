@@ -9,31 +9,22 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.stepMap_v10.chains.PathOverlayLayer
 import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepMap_v10.map.applySmoothMapForceField
 import com.example.stepMap_v10.paths.PathPoint
 import com.example.stepMap_v10.paths.SegmentIndex
-import com.example.stepMap_v10.paths.findNearestSegment
-import com.example.stepMap_v10.paths.pointToSegmentDistance
 import com.example.stepMap_v10.tracking.LocationTrackingService
 import com.example.stepMap_v10.tracking.MovementType
+import com.example.stepMap_v10.tracking.TrackingLiveState
 import kotlinx.coroutines.delay
 import org.mapsforge.map.android.view.MapView
-
-import org.mapsforge.core.model.LatLong
-
 import com.example.stepMap_v10.chains.PathStorage
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 
 @Composable
@@ -72,14 +63,15 @@ fun HomeEffects(
             )
             Log.d("StepByStep_v1.0_TAG", "Tracking started")
         } else {
-            LocationTrackingService.Companion.stop(context) //tracker.stop()
+            LocationTrackingService.Companion.stop(context)
             Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
         }
     }
-    DisposableEffect(hasLocationPermission, isDrawing) {
+    val currentIsDrawing by rememberUpdatedState(isDrawing)
+    DisposableEffect(hasLocationPermission) {
         onDispose {
-            if (!isDrawing){
-                LocationTrackingService.Companion.stop(context) //tracker.stop()
+            if (!currentIsDrawing){
+                LocationTrackingService.Companion.stop(context)
                 Log.d("StepByStep_v1.0_TAG", "Tracking stopped")
             }
         }
@@ -105,54 +97,14 @@ fun HomeEffects(
         }
     }
 
-    LaunchedEffect(latestLivePoint, mapView, isDrawing) {
+    LaunchedEffect(latestLivePoint, mapView) {
         val mv = mapView ?: return@LaunchedEffect
         val point = latestLivePoint ?: return@LaunchedEffect
-
-        locationMarker.update(mv, latestLivePoint.lat, latestLivePoint.lon, true)
-
-        if(isDrawing){
-            val index = segmentIndex ?: return@LaunchedEffect
-            val nearest = findNearestSegment(point.lat, point.lon, index) ?: return@LaunchedEffect
-            val dist = pointToSegmentDistance(LatLong(point.lat, point.lon), nearest)
-
-            /*if (dist < 0.0003) {
-                pathStorage.onGpsPoint(nearest, liveMovementType, index)
-                viewModel.scheduleSaveChains()      //TODO: evaluate whether changing to saveChainsNow() is more effective
-                mv.layerManager.redrawLayers()
-            }*/
-
-            if (dist < 0.0003) {
-                try {
-                    val before = pathStorage.totalPointCount()
-
-                    pathStorage.onGpsPoint(nearest, liveMovementType, index)
-
-                    val after = pathStorage.totalPointCount()
-
-                    if (after != before) {
-                        //viewModel.scheduleSaveChains()
-                    }
-
-                    mv.layerManager.redrawLayers()
-
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
+        locationMarker.update(mv, point.lat, point.lon, true)
     }
 
-    var wasDrawing by remember { mutableStateOf(false) }
     LaunchedEffect(isDrawing) {
-        if (wasDrawing && !isDrawing) {
-            withContext(Dispatchers.Default) {
-                pathStorage.finalizeSession()
-            }
-            viewModel.saveChainsNow()
-            mapView?.layerManager?.redrawLayers()
-        }
-        wasDrawing = isDrawing
+        TrackingLiveState.isDrawing.value = isDrawing
     }
 
 
@@ -160,15 +112,15 @@ fun HomeEffects(
 
     LaunchedEffect(mapView) {
         while (mapView != null) {
-            mapView?.let { mv ->
-                applySmoothMapForceField(mv)
+            mapView?.let {
+                applySmoothMapForceField(it)
             }
 
             delay(16L)
         }
     }
 
-    DisposableEffect(lifecycleOwner, isDrawing) {
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> {

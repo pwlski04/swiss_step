@@ -2,10 +2,12 @@ package com.example.stepMap_v10.tracking
 
 import androidx.compose.runtime.mutableStateOf
 import com.example.stepMap_v10.paths.PathPoint
+import kotlinx.coroutines.flow.MutableStateFlow
 
 object TrackingLiveState {
-    var latestPoint = mutableStateOf<PathPoint?>(null)
-    var movementType = mutableStateOf(MovementType.STILL)
+    val latestPoint = MutableStateFlow<PathPoint?>(null)
+    val movementType = MutableStateFlow(MovementType.STILL)
+    val isDrawing = MutableStateFlow(false)
 
     val isForegroundTracking = mutableStateOf(false)
 }

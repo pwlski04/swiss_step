@@ -3,6 +3,7 @@ package com.example.stepMap_v10.tracking
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -17,24 +18,65 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.stepMap_v10.paths.PathPoint
+import com.example.stepMap_v10.paths.findNearestSegment
+import com.example.stepMap_v10.paths.pointToSegmentDistance
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.Dispatchers
+import org.mapsforge.core.model.LatLong
+import com.example.stepMap_v10.chains.PathStorage
+import com.example.stepMap_v10.paths.SegmentIndex
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+
+/* Access these from Service and ViewModel */
+
+object AppPathStorage {
+    var instance: PathStorage? = null
+}
+
+object AppSegmentIndex {
+    var instance: SegmentIndex? = null
+}
+
+
 
 class LocationTrackingService: Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var sessionId: Long = 0L
     private val movementClassifier = MovementClassifier()
 
+    /* NEW */
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
+
+    private var backgroundPointCount = 0
+
+
+    /* Notification */
     private fun showForegroundNotification() {
+        val openAppIntent = packageManager
+            .getLaunchIntentForPackage(packageName)
+            ?.apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
+
+        val pendingIntent = openAppIntent?.let {
+            PendingIntent.getActivity(
+                this, 0, it,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("StepByStep tracking active")
+            .setContentTitle("Tracking active")
             .setContentText("Recording your walking route.")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
+            .setContentIntent(pendingIntent)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -49,6 +91,7 @@ class LocationTrackingService: Service() {
     }
 
 
+    /* Lifecycle */
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -89,16 +132,25 @@ class LocationTrackingService: Service() {
         return START_STICKY
     }
 
-
     override fun onDestroy() {
         Log.d("StepByStep_v1.0_TAG", "LocationTrackingService destroyed")
         stopLocationUpdates()
+        serviceJob.cancel()
         super.onDestroy()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d("StepByStep_v1.0_TAG", "Task removed — saving chains")
+        serviceScope.launch(Dispatchers.IO) {
+            AppPathStorage.instance?.save(applicationContext)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+
+    /* Location requests */
     private val foregroundRequest = LocationRequest.Builder(
         Priority.PRIORITY_HIGH_ACCURACY,
         1000L
@@ -131,7 +183,10 @@ class LocationTrackingService: Service() {
         }
     }
 
+
+    /* Main location handling */
     private fun handleLocation(location: Location) {
+        Log.d("StepByStep_v1.0_TAG", "handleLocation entered")
         val movementType = movementClassifier.classify(location)
 
         val point = PathPoint(
@@ -145,12 +200,43 @@ class LocationTrackingService: Service() {
         TrackingLiveState.latestPoint.value = point
         TrackingLiveState.movementType.value = movementType
 
-        Log.d(
-            "StepByStep_v1.0_TAG",
-            "Service location: ${location.latitude}, ${location.longitude}, movement=$movementType, session=$sessionId"
-        )
+        // Record into PathStorage (works whether app is open or closed)
+        if (TrackingLiveState.isDrawing.value) {
+            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 1")
+            val storage = AppPathStorage.instance ?: return
+            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 2")
+            val index   = AppSegmentIndex.instance ?: return
+            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 3")
+
+            val nearest = findNearestSegment(location.latitude, location.longitude, index)
+                ?: return
+            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 4")
+            val dist = pointToSegmentDistance(
+                LatLong(location.latitude, location.longitude), nearest
+            )
+
+            if (dist < 0.0003) {
+                Log.d("StepByStep_v1.0_TAG", "Segment found")
+                storage.onGpsPoint(nearest, movementType, index)
+
+                backgroundPointCount++
+                if (backgroundPointCount % 10 == 0) {
+                    serviceScope.launch(Dispatchers.IO) {
+                        storage.save(applicationContext)
+                    }
+                }
+            } else {
+                Log.d("StepByStep_v1.0_TAG", "Segment NOT found")
+            }
+        }
+
+        Log.d("StepByStep_v1.0_TAG",
+            "Location: ${location.latitude}, ${location.longitude}, " +
+                    "movement=$movementType, drawing=${TrackingLiveState.isDrawing.value}")
     }
 
+
+    /* Manange location updates */
     private fun startLocationUpdates() {
         val fineGranted = ActivityCompat.checkSelfPermission(
             this,
@@ -209,6 +295,8 @@ class LocationTrackingService: Service() {
         fusedLocationClient.removeLocationUpdates(callback)
     }
 
+
+    /* Notification channel */
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 

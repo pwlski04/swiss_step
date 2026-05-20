@@ -11,22 +11,17 @@ import org.mapsforge.map.layer.overlay.Marker
 
 class LocationMarker {
     private var currentLocationMarker: Marker? = null
+    private var lastMapView: MapView? = null
 
     fun update(mapView: MapView, lat: Double, lon: Double, isVisible: Boolean) {
-        if(!isVisible){
-            hide(mapView)
-            return
-        }
+        currentLocationMarker?.let { (lastMapView ?: mapView).layerManager.layers.remove(it) }
+        currentLocationMarker = null
+        lastMapView = null
 
-        val oldMarker = currentLocationMarker
-
-        if (oldMarker != null) {
-            mapView.layerManager.layers.remove(oldMarker)
-        }
+        if(!isVisible) return
 
         val sizePx = 52
         val bitmap = createBitmap(sizePx, sizePx)
-
         val canvas = Canvas(bitmap)
 
         val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -51,28 +46,97 @@ class LocationMarker {
         canvas.drawCircle(center, center, 12f, innerPaint)
         canvas.drawCircle(center, center, 12f, borderPaint)
 
-        val mapsforgeBitmap = AndroidBitmap(bitmap)
-
-        val marker = Marker(
-            LatLong(lat, lon),
-            mapsforgeBitmap,
-            0,
-            0
-        )
-
+        val marker = Marker(LatLong(lat, lon), AndroidBitmap(bitmap), 0, 0)
         currentLocationMarker = marker
+        lastMapView = mapView
 
         mapView.layerManager.layers.add(marker)
         mapView.layerManager.redrawLayers()
     }
 
-    fun hide(mapView: MapView){
-        val oldMarker = currentLocationMarker
-
-        if (oldMarker != null){
-            mapView.layerManager.layers.remove(oldMarker)
-            currentLocationMarker = null
-            mapView.layerManager.redrawLayers()
+    fun hide() {
+        val mv = lastMapView ?: return
+        currentLocationMarker?.let {
+            mv.layerManager.layers.remove(it)
+            mv.layerManager.redrawLayers()
         }
+        currentLocationMarker = null
+        lastMapView = null
     }
 }
+
+/*
+class LocationMarker : Layer() {
+    private var position: LatLong? = null
+    private val sizePx = 52f
+
+    private val outerPaint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+        setStyle(Style.FILL)
+        setColor(Color.argb(60, 33, 150, 243))  // use Mapsforge Color or ARGB int
+    }
+    private val innerPaint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+        setStyle(Style.FILL)
+        setColor(Color.rgb(33, 150, 243))
+    }
+    private val borderPaint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+        setStyle(Style.STROKE)
+        setColor(Color.WHITE)
+        setStrokeWidth(4f)
+    }
+
+    fun update(mapView: MapView, lat: Double, lon: Double) {
+        position = LatLong(lat, lon)
+        // Add to map once
+        if (!mapView.layerManager.layers.contains(this)) {
+            mapView.layerManager.layers.add(this)
+        }
+        requestRedraw()
+    }
+
+    fun hide(mapView: MapView) {
+        mapView.layerManager.layers.remove(this)
+        position = null
+    }
+
+    override fun draw(
+        boundingBox: BoundingBox,
+        zoomLevel: Byte,
+        canvas: Canvas,
+        topLeftPoint: Point,
+        rotation: Rotation
+    ) {
+        val pos = position ?: return
+        val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
+
+        val pixelX = MercatorProjection.longitudeToPixelX(pos.longitude, mapSize)
+        val pixelY = MercatorProjection.latitudeToPixelY(pos.latitude, mapSize)
+
+        val screenX = (pixelX - topLeftPoint.x).toFloat()
+        val screenY = (pixelY - topLeftPoint.y).toFloat()
+
+        // Skip if offscreen
+        if (screenX < -sizePx || screenX > canvas.width + sizePx ||
+            screenY < -sizePx || screenY > canvas.height + sizePx) return
+
+        canvas.drawCircle(screenX, screenY, sizePx / 2f * 0.9f, outerPaint)
+        canvas.drawCircle(screenX, screenY, sizePx / 2f * 0.45f, innerPaint)
+        canvas.drawCircle(screenX, screenY, sizePx / 2f * 0.45f, borderPaint)
+    }
+}
+ */
+
+/*
+// In HomeEffects LaunchedEffect(mapView):
+LaunchedEffect(mapView) {
+    val mv = mapView ?: return@LaunchedEffect
+    if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
+        mv.layerManager.layers.add(pathOverlayLayer)
+    }
+    if (!mv.layerManager.layers.contains(locationMarker)) {
+        mv.layerManager.layers.add(locationMarker)  // ← add once
+    }
+}
+
+// In GPS LaunchedEffect — just update position, no add/remove:
+locationMarker.update(mv, point.lat, point.lon)
+ */
