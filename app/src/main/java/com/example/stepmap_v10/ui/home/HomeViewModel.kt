@@ -17,7 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.mapsforge.map.android.view.MapView
-import com.example.stepMap_v10.map.LocationMarker
+//import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepMap_v10.map.copyAssetToInternalStorage
 import com.example.stepMap_v10.paths.findNearestSegment
 import com.example.stepMap_v10.paths.pointToSegmentDistance
@@ -36,7 +36,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val pathOverlayLayer = PathOverlayLayer(pathStorage).also {
         pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
     }
-    val locationMarker = LocationMarker()
+    //val locationMarker = LocationMarker()
     var sharedMapView by mutableStateOf<MapView?>(null)
 
     var allPaths by mutableStateOf<List<Path>>(emptyList())
@@ -65,39 +65,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         //startBackgroundRecording()
         startRedrawLoop()
     }
-    /*
-    private fun startBackgroundRecording() {
-        viewModelScope.launch {
-            TrackingLiveState.latestPoint.collect { point ->
-                if (point == null || !TrackingLiveState.isDrawing.value) return@collect
-                val index = segmentIndex ?: return@collect
-                val nearest = findNearestSegment(point.lat, point.lon, index) ?: return@collect
-                val dist = pointToSegmentDistance(LatLong(point.lat, point.lon), nearest)
-                if (dist < 0.0003) {
-                    try {
-                        val movementType = TrackingLiveState.movementType.value
-                        pathStorage.onGpsPoint(nearest, movementType, index)
-                        sharedMapView?.layerManager?.redrawLayers()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
-        }
-
-        viewModelScope.launch {
-            TrackingLiveState.isDrawing.collect { drawing ->
-                if (!drawing && wasDrawing) {
-                    withContext(Dispatchers.Default) {
-                        pathStorage.finalizeSession()
-                    }
-                    saveChainsNow()
-                    sharedMapView?.layerManager?.redrawLayers()
-                }
-                wasDrawing = drawing
-            }
-        }
-    }*/
 
     private fun startRedrawLoop() {
         viewModelScope.launch {
@@ -162,8 +129,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             pathStorage.finalizeSession()
             pathStorage.save(getApplication())
         }
-        locationMarker.hide()
-        sharedMapView?.destroyAll()
+        sharedMapView?.let { mv ->
+            //locationMarker.hide(mv)
+            mv.destroyAll()
+        }         // locationMarker.hide()
         sharedMapView = null
     }
 
@@ -174,7 +143,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Call this after any chain modification:
     fun refreshHasChains() {
-        hasChains = pathStorage.chains.values.any { it.isNotEmpty() }
+        val newValue = pathStorage.chains.values.any { it.isNotEmpty() }
+        // Switch to main thread for Compose state update
+        viewModelScope.launch(Dispatchers.Main) {
+            hasChains = newValue
+        }
     }
 
     private fun loadSavedChains() {

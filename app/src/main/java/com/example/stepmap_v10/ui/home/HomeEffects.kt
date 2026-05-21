@@ -15,7 +15,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.stepMap_v10.chains.PathOverlayLayer
-import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepMap_v10.map.applySmoothMapForceField
 import com.example.stepMap_v10.paths.PathPoint
 import com.example.stepMap_v10.paths.SegmentIndex
@@ -42,7 +41,7 @@ fun HomeEffects(
     isDrawing: Boolean,
     latestLivePoint: PathPoint?,
     liveMovementType: MovementType,
-    locationMarker: LocationMarker,
+    //locationMarker: LocationMarker,
 
     permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
     hasLocationPermission: Boolean,
@@ -91,16 +90,18 @@ fun HomeEffects(
 
     LaunchedEffect(mapView) {
         val mv = mapView ?: return@LaunchedEffect
-        // Add overlay above tile layer but only once
         if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
             mv.layerManager.layers.add(pathOverlayLayer)
         }
+        /*if (!mv.layerManager.layers.contains(locationMarker)) {
+            mv.layerManager.layers.add(locationMarker)
+        }*/
     }
 
     LaunchedEffect(latestLivePoint, mapView) {
         val mv = mapView ?: return@LaunchedEffect
         val point = latestLivePoint ?: return@LaunchedEffect
-        locationMarker.update(mv, point.lat, point.lon, true)
+        //locationMarker.update(mv, point.lat, point.lon)
     }
 
     LaunchedEffect(isDrawing) {

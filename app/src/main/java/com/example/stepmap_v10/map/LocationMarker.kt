@@ -1,142 +1,115 @@
 package com.example.stepMap_v10.map
 
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import androidx.core.graphics.createBitmap
+import android.annotation.SuppressLint
+import android.view.MotionEvent
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
 import org.mapsforge.core.model.LatLong
-import org.mapsforge.map.android.graphics.AndroidBitmap
+import org.mapsforge.core.util.MercatorProjection
 import org.mapsforge.map.android.view.MapView
-import org.mapsforge.map.layer.overlay.Marker
+import org.mapsforge.map.model.common.Observer
 
-class LocationMarker {
-    private var currentLocationMarker: Marker? = null
-    private var lastMapView: MapView? = null
 
-    fun update(mapView: MapView, lat: Double, lon: Double, isVisible: Boolean) {
-        currentLocationMarker?.let { (lastMapView ?: mapView).layerManager.layers.remove(it) }
-        currentLocationMarker = null
-        lastMapView = null
+@Composable
+fun LocationMarkerOverlay(
+    mapView: MapView?,
+    position: LatLong?,
+    modifier: Modifier = Modifier
+) {
+    if (mapView == null || position == null) return
 
-        if(!isVisible) return
+    var screenPos by remember { mutableStateOf<Offset?>(null) }
+    val isZoomingState = remember { mutableStateOf(false) }
+    var isZooming by isZoomingState
 
-        val sizePx = 52
-        val bitmap = createBitmap(sizePx, sizePx)
-        val canvas = Canvas(bitmap)
+    fun recalculate() {
+        val zoomLevel = mapView.model.mapViewPosition.zoomLevel
+        val center = mapView.model.mapViewPosition.center ?: return
+        val tileSize = mapView.model.displayModel.tileSize
+        val mapSize = MercatorProjection.getMapSize(zoomLevel, tileSize)
 
-        val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(60, 33, 150, 243)
-            style = Paint.Style.FILL
-        }
+        val centerPixelX = MercatorProjection.longitudeToPixelX(center.longitude, mapSize)
+        val centerPixelY = MercatorProjection.latitudeToPixelY(center.latitude, mapSize)
+        val posPixelX = MercatorProjection.longitudeToPixelX(position.longitude, mapSize)
+        val posPixelY = MercatorProjection.latitudeToPixelY(position.latitude, mapSize)
 
-        val innerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(33, 150, 243)
-            style = Paint.Style.FILL
-        }
+        val halfW = mapView.width / 2f
+        val halfH = mapView.height / 2f
 
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.STROKE
-            strokeWidth = 4f
-        }
-
-        val center = sizePx / 2f
-
-        canvas.drawCircle(center, center, 24f, outerPaint)
-        canvas.drawCircle(center, center, 12f, innerPaint)
-        canvas.drawCircle(center, center, 12f, borderPaint)
-
-        val marker = Marker(LatLong(lat, lon), AndroidBitmap(bitmap), 0, 0)
-        currentLocationMarker = marker
-        lastMapView = mapView
-
-        mapView.layerManager.layers.add(marker)
-        mapView.layerManager.redrawLayers()
+        screenPos = Offset(
+            (posPixelX - centerPixelX + halfW).toFloat(),
+            (posPixelY - centerPixelY + halfH).toFloat()
+        )
     }
 
-    fun hide() {
-        val mv = lastMapView ?: return
-        currentLocationMarker?.let {
-            mv.layerManager.layers.remove(it)
-            mv.layerManager.redrawLayers()
+    // To hide marker during zoom
+    val lastZoomRef = remember { mutableStateOf(mapView.model.mapViewPosition.zoomLevel) }
+
+    DisposableEffect(mapView, position) {
+        val observer = Observer {
+            val currentZoom = mapView.model.mapViewPosition.zoomLevel
+            if (currentZoom != lastZoomRef.value) {
+                lastZoomRef.value = currentZoom
+                isZooming = true
+            }
+            recalculate()
         }
-        currentLocationMarker = null
-        lastMapView = null
+
+        mapView.model.mapViewPosition.addObserver(observer)
+        recalculate()
+
+        onDispose {
+            mapView.model.mapViewPosition.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(lastZoomRef.value) {
+        delay(150L)
+        isZooming = false
+    }
+
+    val pos = screenPos ?: return
+
+    @SuppressLint("ClickableViewAccessibility")
+    DisposableEffect(mapView) {
+        val touchListener = android.view.View.OnTouchListener { view, event ->
+            if ((event?.pointerCount ?: 0) >= 2) isZoomingState.value = true
+            if (event?.action == MotionEvent.ACTION_UP) view.performClick()
+            false
+        }
+        mapView.setOnTouchListener(touchListener)
+        onDispose {
+            mapView.setOnTouchListener(null)
+        }
+    }
+
+    LaunchedEffect(lastZoomRef.value) {
+        delay(1000L)  // delay after zoom
+        isZoomingState.value = false
+    }
+
+    if (!isZoomingState.value) {
+        Canvas(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            drawCircle(color = Color(0x3D2196F3.toInt()), radius = 24f, center = pos)
+            drawCircle(color = Color(0xFF2196F3.toInt()), radius = 12f, center = pos)
+            drawCircle(color = Color.White, radius = 12f, center = pos, style = Stroke(width = 4f))
+        }
     }
 }
-
-/*
-class LocationMarker : Layer() {
-    private var position: LatLong? = null
-    private val sizePx = 52f
-
-    private val outerPaint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-        setStyle(Style.FILL)
-        setColor(Color.argb(60, 33, 150, 243))  // use Mapsforge Color or ARGB int
-    }
-    private val innerPaint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-        setStyle(Style.FILL)
-        setColor(Color.rgb(33, 150, 243))
-    }
-    private val borderPaint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-        setStyle(Style.STROKE)
-        setColor(Color.WHITE)
-        setStrokeWidth(4f)
-    }
-
-    fun update(mapView: MapView, lat: Double, lon: Double) {
-        position = LatLong(lat, lon)
-        // Add to map once
-        if (!mapView.layerManager.layers.contains(this)) {
-            mapView.layerManager.layers.add(this)
-        }
-        requestRedraw()
-    }
-
-    fun hide(mapView: MapView) {
-        mapView.layerManager.layers.remove(this)
-        position = null
-    }
-
-    override fun draw(
-        boundingBox: BoundingBox,
-        zoomLevel: Byte,
-        canvas: Canvas,
-        topLeftPoint: Point,
-        rotation: Rotation
-    ) {
-        val pos = position ?: return
-        val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
-
-        val pixelX = MercatorProjection.longitudeToPixelX(pos.longitude, mapSize)
-        val pixelY = MercatorProjection.latitudeToPixelY(pos.latitude, mapSize)
-
-        val screenX = (pixelX - topLeftPoint.x).toFloat()
-        val screenY = (pixelY - topLeftPoint.y).toFloat()
-
-        // Skip if offscreen
-        if (screenX < -sizePx || screenX > canvas.width + sizePx ||
-            screenY < -sizePx || screenY > canvas.height + sizePx) return
-
-        canvas.drawCircle(screenX, screenY, sizePx / 2f * 0.9f, outerPaint)
-        canvas.drawCircle(screenX, screenY, sizePx / 2f * 0.45f, innerPaint)
-        canvas.drawCircle(screenX, screenY, sizePx / 2f * 0.45f, borderPaint)
-    }
-}
- */
-
-/*
-// In HomeEffects LaunchedEffect(mapView):
-LaunchedEffect(mapView) {
-    val mv = mapView ?: return@LaunchedEffect
-    if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
-        mv.layerManager.layers.add(pathOverlayLayer)
-    }
-    if (!mv.layerManager.layers.contains(locationMarker)) {
-        mv.layerManager.layers.add(locationMarker)  // ← add once
-    }
-}
-
-// In GPS LaunchedEffect — just update position, no add/remove:
-locationMarker.update(mv, point.lat, point.lon)
- */

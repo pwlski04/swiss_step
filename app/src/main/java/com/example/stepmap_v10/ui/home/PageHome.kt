@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.text.style.TextAlign
 import com.example.stepMap_v10.chains.PathOverlayLayer
 import com.example.stepMap_v10.chains.PathStorage
+import com.example.stepMap_v10.map.LocationMarkerOverlay
 
 import org.mapsforge.core.model.LatLong
 
@@ -58,7 +59,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             isDrawing = isDrawing,
             latestLivePoint = latestLivePoint,
             liveMovementType = liveMovementType,
-            locationMarker = viewModel.locationMarker,
+            //locationMarker = viewModel.locationMarker,
 
             permissionLauncher = permissionLauncher,
             hasLocationPermission = hasLocationPermission,
@@ -102,6 +103,13 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                             }
                         )
                     }
+
+                    LocationMarkerOverlay(
+                        mapView = viewModel.sharedMapView,
+                        position = state.latestLivePoint?.let {
+                            LatLong(it.lat, it.lon)
+                        }
+                    )
 
                     Surface(
                         shape = RoundedCornerShape(18.dp),

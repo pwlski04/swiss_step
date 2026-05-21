@@ -275,8 +275,7 @@ class PathStorage () {
         }
 
         modifiedMovementTypes.add(movementType)
-        onChainsChanged?.invoke()
-        return when {
+        val result = when {
             // Case 1: Both ends connect two different chains -> merge them
             headChain != null && tailChain != null && headChain !== tailChain -> {
                 headChain.points.addLast(if (headIsReversed) segStart else segEnd)
@@ -306,6 +305,8 @@ class PathStorage () {
                 c
             }
         }
+        onChainsChanged?.invoke()
+        return result
 
     }
 
