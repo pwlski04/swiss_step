@@ -48,6 +48,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var saveJob: Job? = null
     private var wasDrawing: Boolean
 
+
     init {
         AppPathStorage.instance = pathStorage
         AppSegmentIndex.instance = null
@@ -120,19 +121,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        /* replaced
-        viewModelScope.launch(Dispatchers.IO) {
-            pathStorage.save(getApplication())
-        }
-        with */
         runBlocking(Dispatchers.IO) {
             pathStorage.finalizeSession()
             pathStorage.save(getApplication())
         }
         sharedMapView?.let { mv ->
-            //locationMarker.hide(mv)
             mv.destroyAll()
-        }         // locationMarker.hide()
+        }
         sharedMapView = null
     }
 

@@ -78,7 +78,9 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
         val h = canvas.height.toDouble()
 
         for (movementType in DRAW_ORDER) {      // (1)
-            val chains = pathStorage.chains[movementType]?.toList() ?: continue
+            val chains = synchronized(pathStorage) {
+                pathStorage.chains[movementType]?.toList()
+            } ?: continue
             if (chains.isEmpty()) continue
             val paint = getPaint(movementType, zoomLevel)       // (2)
 
@@ -87,7 +89,7 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
                 if (chain.dirty || !zoomCache.containsKey(zoomLevel)){
                     zoomCache.clear()
                     zoomCache[zoomLevel] = projectChain(chain, zoomLevel)       // (3)
-                    //chain.dirty = false
+                    chain.dirty = false
                 }
 
                 drawProjectedChain(zoomCache[zoomLevel]!!, topLeftPoint, canvas, paint, w, h)       // Uses the cache

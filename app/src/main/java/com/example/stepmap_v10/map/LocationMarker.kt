@@ -1,12 +1,12 @@
-package com.example.stepMap_v10.map
+package com.example.stepmap_v10.map
 
 import android.annotation.SuppressLint
 import android.view.MotionEvent
+import android.view.View
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -16,8 +16,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.delay
 import org.mapsforge.core.model.LatLong
 import org.mapsforge.core.util.MercatorProjection
@@ -35,7 +33,6 @@ fun LocationMarkerOverlay(
 
     var screenPos by remember { mutableStateOf<Offset?>(null) }
     val isZoomingState = remember { mutableStateOf(false) }
-    var isZooming by isZoomingState
 
     fun recalculate() {
         val zoomLevel = mapView.model.mapViewPosition.zoomLevel
@@ -65,7 +62,7 @@ fun LocationMarkerOverlay(
             val currentZoom = mapView.model.mapViewPosition.zoomLevel
             if (currentZoom != lastZoomRef.value) {
                 lastZoomRef.value = currentZoom
-                isZooming = true
+                isZoomingState.value = true
             }
             recalculate()
         }
@@ -78,16 +75,11 @@ fun LocationMarkerOverlay(
         }
     }
 
-    LaunchedEffect(lastZoomRef.value) {
-        delay(150L)
-        isZooming = false
-    }
-
     val pos = screenPos ?: return
 
     @SuppressLint("ClickableViewAccessibility")
     DisposableEffect(mapView) {
-        val touchListener = android.view.View.OnTouchListener { view, event ->
+        val touchListener = View.OnTouchListener { view, event ->
             if ((event?.pointerCount ?: 0) >= 2) isZoomingState.value = true
             if (event?.action == MotionEvent.ACTION_UP) view.performClick()
             false
@@ -99,7 +91,7 @@ fun LocationMarkerOverlay(
     }
 
     LaunchedEffect(lastZoomRef.value) {
-        delay(1000L)  // delay after zoom
+        delay(300L)  // delay after zoom
         isZoomingState.value = false
     }
 

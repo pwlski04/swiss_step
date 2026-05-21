@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.Observer
 import com.example.stepMap_v10.chains.PathOverlayLayer
 import com.example.stepMap_v10.map.applySmoothMapForceField
 import com.example.stepMap_v10.paths.PathPoint

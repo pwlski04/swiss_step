@@ -2,6 +2,7 @@ package com.example.stepMap_v10.ui.home
 
 import android.content.Context
 import android.util.Log
+import android.view.MotionEvent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -21,9 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 import androidx.compose.ui.text.style.TextAlign
-import com.example.stepMap_v10.chains.PathOverlayLayer
-import com.example.stepMap_v10.chains.PathStorage
-import com.example.stepMap_v10.map.LocationMarkerOverlay
+import com.example.stepmap_v10.map.LocationMarkerOverlay
 
 import org.mapsforge.core.model.LatLong
 
@@ -192,8 +191,31 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 val p = point
 
                                 if (mv != null && p != null) {
-                                    mv.setZoomLevel(18.toByte())
-                                    mv.setCenter(LatLong(p.lat, p.lon))
+                                    // ACTION_DOWN cancels fling in any scrollable view
+                                    val downEvent = MotionEvent.obtain(
+                                        System.currentTimeMillis(),
+                                        System.currentTimeMillis(),
+                                        MotionEvent.ACTION_DOWN,
+                                        mv.width / 2f,
+                                        mv.height / 2f,
+                                        0
+                                    )
+                                    val cancelEvent = MotionEvent.obtain(
+                                        System.currentTimeMillis(),
+                                        System.currentTimeMillis(),
+                                        MotionEvent.ACTION_CANCEL,
+                                        mv.width / 2f,
+                                        mv.height / 2f,
+                                        0
+                                    )
+                                    mv.dispatchTouchEvent(downEvent)
+                                    mv.dispatchTouchEvent(cancelEvent)
+                                    downEvent.recycle()
+                                    cancelEvent.recycle()
+
+                                    // MAIN
+                                    mv.model.mapViewPosition.setCenter(LatLong(p.lat, p.lon))
+                                    mv.model.mapViewPosition.zoomLevel = 18.toByte()
                                     mv.layerManager.redrawLayers()
                                 }
                             },
