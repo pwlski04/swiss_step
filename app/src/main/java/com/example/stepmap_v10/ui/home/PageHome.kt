@@ -3,6 +3,9 @@ package com.example.stepMap_v10.ui.home
 import android.content.Context
 import android.util.Log
 import android.view.MotionEvent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -17,21 +20,28 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import com.example.stepmap_v10.map.LocationMarkerOverlay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 import org.mapsforge.core.model.LatLong
+import java.io.File
 
 
 /*
 TODO:
 - to fix:
-    - pressing locator while scrolling map should stop movement
-    - location marker is huge while zooming in and
+    - path drawing
     - should not draw still paths
 - experience
     - save paths under a name when resetting to reuse later
@@ -153,26 +163,87 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                             )
                         }
 
-
-                        if (!isDrawing && viewModel.hasChains) {
+                        if (isDrawing) {
                             Surface(
-                                //BUTTON: REMOVE HISTORY
                                 onClick = {
-                                    state.pathStorage.clearSegments()
-                                    viewModel.sharedMapView?.layerManager?.redrawLayers()
-                                    viewModel.deleteSavedChains()
+                                    if (viewModel.routeRecorder.isRecording) {
+                                        viewModel.routeRecorder.stopAndSave(context)
+                                    } else {
+                                        viewModel.routeRecorder.startRecording()
+                                    }
                                 },
-                                shape = RoundedCornerShape(18.dp),
-                                tonalElevation = 6.dp,
-                                shadowElevation = 8.dp,
-                                modifier = Modifier
-                                    .padding(top = 12.dp, end = 12.dp)
+                                shape = RoundedCornerShape(18.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Filled.DeleteOutline,
-                                    contentDescription = "Remove history",
+                                    imageVector = if (viewModel.routeRecorder.isRecording)
+                                        Icons.Filled.Stop else Icons.Filled.FiberManualRecord,
+                                    contentDescription = "Record route",
                                     modifier = Modifier.padding(14.dp)
                                 )
+                            }
+                        } else { // Replay button — show when not drawing and delete when long pressing:
+                            val routes = remember { viewModel.routeRecorder.listSavedRoutes(context).toMutableStateList() }
+
+                            routes.forEach { fileName ->
+                                val scope = rememberCoroutineScope()
+                                var holdJob by remember { mutableStateOf<Job?>(null) }
+
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    tonalElevation = 6.dp,
+                                    shadowElevation = 8.dp,
+                                    modifier = Modifier.padding(4.dp)
+                                ) {
+                                    Text(
+                                        text = fileName.removePrefix("route_").removeSuffix(".json"),
+                                        modifier = Modifier
+                                            .padding(14.dp)
+                                            .pointerInput(fileName) {
+                                                awaitPointerEventScope {
+                                                    while (true) {
+                                                        awaitFirstDown(requireUnconsumed = false)
+                                                        holdJob = scope.launch {
+                                                            delay(3000L)
+                                                            File(context.filesDir, fileName).delete()
+                                                            routes.remove(fileName)
+                                                        }
+                                                        do {
+                                                            val event = awaitPointerEvent(
+                                                                PointerEventPass.Final)
+                                                            if (event.changes.all { !it.pressed }) {
+                                                                holdJob?.cancel()
+                                                                holdJob = null
+                                                                break
+                                                            }
+                                                        } while (true)
+                                                    }
+                                                }
+                                            }
+                                            .clickable { viewModel.replayRoute(context, fileName) }
+                                    )
+                                }
+                            }
+
+                            if(viewModel.hasChains) {
+                                Surface(
+                                    //BUTTON: REMOVE HISTORY
+                                    onClick = {
+                                        state.pathStorage.clearSegments()
+                                        viewModel.sharedMapView?.layerManager?.redrawLayers()
+                                        viewModel.deleteSavedChains()
+                                    },
+                                    shape = RoundedCornerShape(18.dp),
+                                    tonalElevation = 6.dp,
+                                    shadowElevation = 8.dp,
+                                    modifier = Modifier
+                                        .padding(top = 12.dp, end = 12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.DeleteOutline,
+                                        contentDescription = "Remove history",
+                                        modifier = Modifier.padding(14.dp)
+                                    )
+                                }
                             }
                         }
                     }

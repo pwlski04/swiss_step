@@ -30,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import org.mapsforge.core.model.LatLong
 import com.example.stepMap_v10.chains.PathStorage
 import com.example.stepMap_v10.paths.SegmentIndex
+import com.example.stepmap_v10.chains.AppRouteRecorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -188,6 +189,9 @@ class LocationTrackingService: Service() {
     private fun handleLocation(location: Location) {
         Log.d("StepByStep_v1.0_TAG", "handleLocation entered")
         val movementType = movementClassifier.classify(location)
+
+        /* TAG REMOVE (RECORDER): this line */
+        AppRouteRecorder.instance?.recordPoint(location.latitude, location.longitude, movementType)
 
         val point = PathPoint(
             location.latitude,

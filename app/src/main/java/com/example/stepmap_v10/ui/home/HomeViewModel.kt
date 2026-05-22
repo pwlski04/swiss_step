@@ -1,6 +1,7 @@
 package com.example.stepMap_v10.ui.home
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +26,8 @@ import com.example.stepMap_v10.tracking.AppPathStorage
 import com.example.stepMap_v10.tracking.AppSegmentIndex
 import com.example.stepMap_v10.tracking.TrackingLiveState
 import com.example.stepMap_v10.tracking.loadIsDrawing
+import com.example.stepmap_v10.chains.AppRouteRecorder
+import com.example.stepmap_v10.chains.RouteRecorder
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -49,9 +52,38 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var wasDrawing: Boolean
 
 
+    /* TAG REMOVE (RECORDER): this block */
+    val routeRecorder = RouteRecorder()
+    var isReplayingRoute by mutableStateOf(false)
+    fun replayRoute(context: Context, fileName: String) {
+        isReplayingRoute = true
+        viewModelScope.launch(Dispatchers.Default) {
+            routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType ->
+                val index = AppSegmentIndex.instance ?: return@loadAndReplay
+                val nearest = findNearestSegment(lat, lon, index) ?: return@loadAndReplay
+                val dist = pointToSegmentDistance(LatLong(lat, lon), nearest)
+                if (dist < 0.0003) {
+                    pathStorage.onGpsPoint(nearest, movementType, index)
+                }
+                // No sleep, no redraw here
+            }
+            // Single redraw after all points processed
+            withContext(Dispatchers.Main) {
+                pathStorage.finalizeSession()
+                saveChainsNow()
+                sharedMapView?.layerManager?.redrawLayers()
+                isReplayingRoute = false
+            }
+        }
+    }
+
+
     init {
         AppPathStorage.instance = pathStorage
         AppSegmentIndex.instance = null
+
+        /* TAG REMOVE (RECORDER): this line */
+        AppRouteRecorder.instance = routeRecorder
 
         val restoredIsDrawing = loadIsDrawing(getApplication())
         TrackingLiveState.isDrawing.value = restoredIsDrawing
