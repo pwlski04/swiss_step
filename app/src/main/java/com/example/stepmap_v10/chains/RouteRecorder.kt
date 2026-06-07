@@ -1,9 +1,8 @@
 package com.example.stepmap_v10.chains
 
 import android.content.Context
-import com.example.stepMap_v10.tracking.MovementType
+import com.example.stepmap_v10.tracking.MovementType
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -48,13 +47,26 @@ class RouteRecorder {
     fun loadAndReplay(
         context: Context,
         fileName: String,
+        onPoint: (lat: Double, lon: Double, movementType: MovementType, timestamp: Long) -> Unit
+    ): Int {
+        val text = File(context.filesDir, fileName).readText()
+        val json = Json { ignoreUnknownKeys = true }
+        val route = json.decodeFromString<RecordedRoute>(text)
+        route.points.forEach { onPoint(it.lat, it.lon, it.movementType, it.timestamp) }
+        return route.points.size
+    }
+
+    /*fun loadAndReplay(
+        context: Context,
+        fileName: String,
         onPoint: (lat: Double, lon: Double, movementType: MovementType) -> Unit
-    ) {
+    ): Int {
         val text = File(context.filesDir, fileName).readText()
         val json = Json { ignoreUnknownKeys = true }
         val route = json.decodeFromString<RecordedRoute>(text)
         route.points.forEach { onPoint(it.lat, it.lon, it.movementType) }
-    }
+        return route.points.size
+    }*/
 }
 
 @kotlinx.serialization.Serializable

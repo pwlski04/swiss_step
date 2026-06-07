@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.ui.theme
+package com.example.stepmap_v10.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

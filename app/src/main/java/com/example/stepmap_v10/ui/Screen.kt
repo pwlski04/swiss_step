@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.ui
+package com.example.stepmap_v10.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
@@ -33,9 +33,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.stepMap_v10.ui.home.HomeViewModel
-import com.example.stepMap_v10.ui.preferences.Page_Preferences
-import com.example.stepMap_v10.ui.home.Page_Home
+import com.example.stepmap_v10.ui.home.HomeViewModel
+import com.example.stepmap_v10.ui.preferences.Page_Preferences
+import com.example.stepmap_v10.ui.home.Page_Home
 
 
 @Preview(showBackground = true)

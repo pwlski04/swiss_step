@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.ui.home
+package com.example.stepmap_v10.ui.home
 
 import android.content.Context
 import androidx.activity.compose.ManagedActivityResultLauncher
@@ -12,13 +12,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.stepMap_v10.chains.PathOverlayLayer
-import com.example.stepMap_v10.chains.PathStorage
-import com.example.stepMap_v10.paths.Path
-import com.example.stepMap_v10.paths.PathPoint
-import com.example.stepMap_v10.tracking.MovementType
-import com.example.stepMap_v10.tracking.TrackingLiveState
-import com.example.stepMap_v10.tracking.loadIsDrawing
+import com.example.stepmap_v10.chains.PathOverlayLayer
+import com.example.stepmap_v10.chains.PathStorage
+import com.example.stepmap_v10.paths.PathPoint
+import com.example.stepmap_v10.tracking.MovementType
+import com.example.stepmap_v10.tracking.TrackingLiveState
+import com.example.stepmap_v10.tracking.loadIsDrawing
 import org.mapsforge.map.android.view.MapView
 import androidx.compose.runtime.collectAsState
 

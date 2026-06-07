@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.paths
+package com.example.stepmap_v10.paths
 
 import android.content.Context
 import org.json.JSONArray

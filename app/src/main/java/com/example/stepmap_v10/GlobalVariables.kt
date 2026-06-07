@@ -1,6 +1,6 @@
-package com.example.stepMap_v10
+package com.example.stepmap_v10
 
-import com.example.stepMap_v10.tracking.MovementType
+import com.example.stepmap_v10.tracking.MovementType
 import android.graphics.Color
 
 var colorMap = mutableMapOf(

@@ -1,9 +1,9 @@
-package com.example.stepMap_v10.paths
+package com.example.stepmap_v10.paths
 
-import com.example.stepMap_v10.tracking.MovementType
+import com.example.stepmap_v10.tracking.MovementType
 import org.mapsforge.core.model.LatLong
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
-import com.example.stepMap_v10.colorMap
+import com.example.stepmap_v10.colorMap
 
 /* PATH UTILS */
 fun List<Path>.toSegments(): List<Segment>{

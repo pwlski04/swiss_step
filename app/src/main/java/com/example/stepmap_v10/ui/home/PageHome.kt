@@ -1,11 +1,10 @@
-package com.example.stepMap_v10.ui.home
+package com.example.stepmap_v10.ui.home
 
 import android.content.Context
 import android.util.Log
 import android.view.MotionEvent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -219,7 +218,9 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                                     }
                                                 }
                                             }
-                                            .clickable { viewModel.replayRoute(context, fileName) }
+                                            .clickable {
+                                                viewModel.replayRoute(context, fileName)
+                                            }
                                     )
                                 }
                             }

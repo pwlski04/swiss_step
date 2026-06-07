@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.ui.preferences
+package com.example.stepmap_v10.ui.preferences
 
 import android.graphics.Color
 import androidx.compose.foundation.background
@@ -20,9 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.stepMap_v10.colorMap
-import com.example.stepMap_v10.tracking.MovementType
-import com.example.stepMap_v10.ui.preferences.colorValuesToNames
+import com.example.stepmap_v10.colorMap
+import com.example.stepmap_v10.tracking.MovementType
 
 fun handleSelect(movementType: MovementType, color: Int) {
     colorMap[movementType] = color

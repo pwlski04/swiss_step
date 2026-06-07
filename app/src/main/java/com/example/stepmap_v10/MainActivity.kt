@@ -1,16 +1,16 @@
-package com.example.stepMap_v10
+package com.example.stepmap_v10
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import com.example.stepMap_v10.ui.theme.StepByStep_v10Theme
+import com.example.stepmap_v10.ui.theme.StepByStep_v10Theme_Light
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.example.stepMap_v10.ui.Screen
+import com.example.stepmap_v10.ui.Screen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,7 +35,7 @@ fun Greeting(name: String, modifier: Modifier = Modifier) {
 @Preview(showBackground = true)
 @Composable
 fun GreetingPreview() {
-    StepByStep_v10Theme {
+    StepByStep_v10Theme_Light {
         Greeting("Android")
     }
 }

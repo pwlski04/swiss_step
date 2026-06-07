@@ -1,7 +1,6 @@
-package com.example.stepMap_v10.map
+package com.example.stepmap_v10.map
 
 import android.content.Context
-import com.example.stepMap_v10.chains.PathOverlayLayer
 import org.mapsforge.core.model.LatLong
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.android.util.AndroidUtil

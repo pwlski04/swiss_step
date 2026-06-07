@@ -1,14 +1,13 @@
-package com.example.stepMap_v10.ui.home
+package com.example.stepmap_v10.ui.home
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import com.example.stepMap_v10.map.createMapView
+import com.example.stepmap_v10.map.createMapView
 import org.mapsforge.map.android.view.MapView
 
 @Composable

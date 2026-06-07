@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.map
+package com.example.stepmap_v10.map
 
 import kotlin.math.cos
 

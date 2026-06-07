@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.tracking
+package com.example.stepmap_v10.tracking
 
 import android.location.Location
 import kotlinx.serialization.Serializable
@@ -31,12 +31,15 @@ class MovementClassifier {
     private var bikingLikeCount = 0
 
 
+    @Transient
+    private var lastLocation: Location? = null
+
     fun classify(location: Location): MovementType {
         val speedKmh = location.speed * 3.6f
 
         recentSpeedsKmh.addLast(speedKmh)
 
-        if (TrackingLiveState.isForegroundTracking.value && recentSpeedsKmh.size > 30 || !TrackingLiveState.isForegroundTracking.value && recentSpeedsKmh.size > 6) {
+        if (TrackingLiveState.isForegroundTracking.value && recentSpeedsKmh.size > 10 || !TrackingLiveState.isForegroundTracking.value && recentSpeedsKmh.size > 4) {
             recentSpeedsKmh.removeFirst()
         }
 

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.stepMap_v10"
+    namespace = "com.example.stepmap_v10"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -53,6 +53,8 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.compose.foundation.layout)
     implementation(libs.androidx.compose.runtime)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.compose.foundation)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

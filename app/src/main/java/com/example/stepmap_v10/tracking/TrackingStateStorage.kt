@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.tracking
+package com.example.stepmap_v10.tracking
 
 import android.content.Context
 import androidx.core.content.edit

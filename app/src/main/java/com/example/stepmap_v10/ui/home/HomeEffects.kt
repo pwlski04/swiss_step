@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.ui.home
+package com.example.stepmap_v10.ui.home
 
 import android.Manifest
 import android.content.Context
@@ -14,17 +14,17 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.Observer
-import com.example.stepMap_v10.chains.PathOverlayLayer
-import com.example.stepMap_v10.map.applySmoothMapForceField
-import com.example.stepMap_v10.paths.PathPoint
-import com.example.stepMap_v10.paths.SegmentIndex
-import com.example.stepMap_v10.tracking.LocationTrackingService
-import com.example.stepMap_v10.tracking.MovementType
-import com.example.stepMap_v10.tracking.TrackingLiveState
+import com.example.stepmap_v10.chains.DebugPointsLayer
+import com.example.stepmap_v10.chains.PathOverlayLayer
+import com.example.stepmap_v10.map.applySmoothMapForceField
+import com.example.stepmap_v10.paths.PathPoint
+import com.example.stepmap_v10.paths.SegmentIndex
+import com.example.stepmap_v10.tracking.LocationTrackingService
+import com.example.stepmap_v10.tracking.MovementType
+import com.example.stepmap_v10.tracking.TrackingLiveState
 import kotlinx.coroutines.delay
 import org.mapsforge.map.android.view.MapView
-import com.example.stepMap_v10.chains.PathStorage
+import com.example.stepmap_v10.chains.PathStorage
 
 
 @Composable
@@ -52,6 +52,18 @@ fun HomeEffects(
 
     onMapViewReady: (MapView) -> Unit,
     ){
+    //TODO: REMOVE
+    LaunchedEffect(mapView) {
+        val mv = mapView ?: return@LaunchedEffect
+        if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
+            mv.layerManager.layers.add(pathOverlayLayer)
+        }
+        // Debug layer — add on top
+        val debugLayer = DebugPointsLayer(viewModel.pathStorage)
+        viewModel.debugLayer = debugLayer
+        mv.layerManager.layers.add(debugLayer)
+    }
+
     /* START TRACKING WHEN LOCATION PERMISSION IS GRANTED */
     /* STOP TRACKING WHEN LOCATION PERMISSION IS REVOKED, OR ON DISPOSE && NOT DRAWING */
     LaunchedEffect(hasLocationPermission) {

@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.ui.theme
+package com.example.stepmap_v10.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -33,7 +33,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun StepByStep_v10Theme(
+fun StepByStep_v10Theme_Light(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,

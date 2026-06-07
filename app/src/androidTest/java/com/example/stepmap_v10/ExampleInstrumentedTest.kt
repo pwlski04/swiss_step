@@ -1,4 +1,4 @@
-package com.example.stepMap_v10
+package com.example.stepmap_v10
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4

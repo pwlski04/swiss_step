@@ -1,7 +1,7 @@
-package com.example.stepMap_v10.tracking
+package com.example.stepmap_v10.tracking
 
 import androidx.compose.runtime.mutableStateOf
-import com.example.stepMap_v10.paths.PathPoint
+import com.example.stepmap_v10.paths.PathPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 
 object TrackingLiveState {

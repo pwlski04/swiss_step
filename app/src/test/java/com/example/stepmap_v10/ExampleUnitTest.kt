@@ -1,4 +1,4 @@
-package com.example.stepMap_v10
+package com.example.stepmap_v10
 
 import org.junit.Test
 

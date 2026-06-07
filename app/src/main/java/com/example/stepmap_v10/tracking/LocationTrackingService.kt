@@ -1,4 +1,4 @@
-package com.example.stepMap_v10.tracking
+package com.example.stepmap_v10.tracking
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -17,9 +17,9 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.example.stepMap_v10.paths.PathPoint
-import com.example.stepMap_v10.paths.findNearestSegment
-import com.example.stepMap_v10.paths.pointToSegmentDistance
+import com.example.stepmap_v10.paths.PathPoint
+import com.example.stepmap_v10.paths.findNearestSegment
+import com.example.stepmap_v10.paths.pointToSegmentDistance
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -28,8 +28,8 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.Dispatchers
 import org.mapsforge.core.model.LatLong
-import com.example.stepMap_v10.chains.PathStorage
-import com.example.stepMap_v10.paths.SegmentIndex
+import com.example.stepmap_v10.chains.PathStorage
+import com.example.stepmap_v10.paths.SegmentIndex
 import com.example.stepmap_v10.chains.AppRouteRecorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -220,6 +220,15 @@ class LocationTrackingService: Service() {
             )
 
             if (dist < 0.0003) {
+                val effectiveType = if (movementType != MovementType.STILL) {
+                    storage.lastActiveMovementType = movementType
+                    movementType
+                } else {
+                    storage.lastActiveMovementType
+                }
+                storage.onGpsPoint(nearest, effectiveType, index)
+            }
+            /*if (dist < 0.0003 && movementType != MovementType.STILL) {
                 Log.d("StepByStep_v1.0_TAG", "Segment found")
                 storage.onGpsPoint(nearest, movementType, index)
 
@@ -231,7 +240,7 @@ class LocationTrackingService: Service() {
                 }
             } else {
                 Log.d("StepByStep_v1.0_TAG", "Segment NOT found")
-            }
+            }*/
         }
 
         Log.d("StepByStep_v1.0_TAG",
