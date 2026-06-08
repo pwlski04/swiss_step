@@ -17,8 +17,6 @@ import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.layer.Layer
 import kotlinx.serialization.Serializable
 import android.content.Context
-import android.util.Log
-import androidx.compose.foundation.style.Style
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -65,6 +63,17 @@ data class StoredPathChain(
 data class StoredPoint(
     val lat: Double,
     val lon: Double
+)
+
+
+private data class PathHypothesis(
+    val id: Long,
+    val chain: PathChain,
+    var lastSegment: Segment,
+    var timestamp: Long,
+    var score: Double = 0.0,
+    var missCount: Int = 0,
+    var pointCount: Int = 0
 )
 
 //TODO: REMOVE
@@ -145,7 +154,6 @@ class DebugPointsLayer(private val pathStorage: PathStorage) : Layer() {
 }
 
 /* OVERLAY => Rendered over base map */
-
 class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
     private val paintCache = HashMap<Pair<MovementType, Byte>, Paint>()
     private val projectionCache = ConcurrentHashMap<Long, HashMap<Byte, List<Pair<Double, Double>>>>()        // Cache of pre-projected points per chain per zoom level
@@ -235,30 +243,351 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
 
 /* RENDERED DATA => Saves the logic etc. behind the rendered point chains */
 
-class PathStorage () {
-    var lastActiveMovementType: MovementType = MovementType.TRANSPORT
+class PathStorage {
 
-    val chains: MutableMap<MovementType, MutableList<PathChain>> = MovementType.entries.associateWith { mutableListOf<PathChain>() }.toMutableMap()
+    // Only PRIMARY chains — rendered and saved
+    val chains: MutableMap<MovementType, MutableList<PathChain>> =
+        MovementType.entries.associateWith { mutableListOf<PathChain>() }.toMutableMap()
+
     val modifiedMovementTypes = mutableSetOf<MovementType>()
     private var nextChainId = 0L
+    private var nextHypId   = 0L
 
-    private val liveTails = HashMap<MovementType, LiveTail>()
-    private val LIVE_GAP_THRESHOLD_DEGREES = 0.0003  // ~30m
-    private val LIVE_GAP_THRESHOLD_MS = 30_000L       // 30 seconds
+    // One primary per movement type (shown on map)
+    private val primary = HashMap<MovementType, PathHypothesis>()
+    // Backups per movement type (NOT shown — chain NOT in chains[])
+    private val backups = HashMap<MovementType, MutableList<PathHypothesis>>()
 
-    var onChainRemoved: ((Long) -> Unit)? = null        // (*)
+    private val LIVE_GAP_THRESHOLD_MS   = 30_000L
+    private val MAX_CONTINUITY_DISTANCE = 0.0008
+    private val MISS_THRESHOLD          = 5
+    private val MAX_BACKUPS             = 3
 
-    private val CONTINUITY_SEARCH_RADIUS = 3       // connected hops to search
-    private val DRIFT_REJECT_DISTANCE = 0.0004     // ~40m: farther = likely drift
-    private val MAX_CONTINUITY_DISTANCE = 0.0008   // ~80m: give up continuity beyond this
-
-    /* Store and restore chains */
-    private val FILE_NAME = "walked_chains.json"
-
-    private val json = Json {prettyPrint = false; ignoreUnknownKeys = true }
-
+    var onChainRemoved: ((Long) -> Unit)? = null
     var onChainsChanged: (() -> Unit)? = null
+    var lastActiveMovementType: MovementType = MovementType.TRANSPORT
 
+    private val FILE_NAME = "walked_chains.json"
+    private val json = Json { prettyPrint = false; ignoreUnknownKeys = true }
+
+
+    private val HARD_RESET_THRESHOLD = 30
+    private val BFS_SEARCH_DISTANCE = 0.005
+
+
+    /* ── GPS entry point ── */
+    // 1. Fix initial direction in spawnFreshPrimary
+    private fun spawnFreshPrimary(
+        gpsPoint: LatLong, movementType: MovementType,
+        index: SegmentIndex, now: Long
+    ) {
+        val nearest = index.nearbySegments(gpsPoint.latitude, gpsPoint.longitude)
+            .filter { pointToSegmentDistance(gpsPoint, it) < 0.0006 }
+            .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
+            ?: return
+
+        // Orient chain based on which end GPS is closer to
+        val distToStart = gpsPoint.distanceTo(nearest.startingPoint)
+        val distToEnd   = gpsPoint.distanceTo(nearest.endingPoint)
+        val (first, second) = if (distToStart <= distToEnd)
+            Pair(nearest.startingPoint, nearest.endingPoint)
+        else
+            Pair(nearest.endingPoint, nearest.startingPoint)
+
+        val chain = PathChain(
+            id = nextChainId++,
+            movementType = movementType,
+            points = ArrayDeque(listOf(first, second)),
+            dirty = true
+        )
+        chains[movementType]?.add(chain)
+        primary[movementType] = PathHypothesis(
+            id = nextHypId++,
+            chain = chain,
+            lastSegment = nearest,
+            timestamp = now
+        )
+        modifiedMovementTypes.add(movementType)
+        onChainsChanged?.invoke()
+    }
+
+    // 2. Back to simple extendChain (no path tracing)
+    private fun extendChain(chain: PathChain, segment: Segment, lastPoint: LatLong) {
+        val s = segment.startingPoint
+        val e = segment.endingPoint
+        val appendStart = lastPoint.distanceTo(s) <= lastPoint.distanceTo(e)
+        if (appendStart) {
+            if (lastPoint.distanceTo(s) > 0.00001) chain.points.addLast(s)
+            chain.points.addLast(e)
+        } else {
+            if (lastPoint.distanceTo(e) > 0.00001) chain.points.addLast(e)
+            chain.points.addLast(s)
+        }
+        chain.dirty = true
+    }
+
+    // 3. onGpsPoint with hard reset and simple extendChain
+    @Synchronized
+    fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex) {
+        if (movementType == MovementType.STILL) return
+        lastActiveMovementType = movementType
+        val now = System.currentTimeMillis()
+
+        val bkps = backups.getOrPut(movementType) { mutableListOf() }
+
+        if (primary[movementType]?.let { now - it.timestamp > LIVE_GAP_THRESHOLD_MS } == true) {
+            removePrimary(movementType)
+        }
+        bkps.removeAll { now - it.timestamp > LIVE_GAP_THRESHOLD_MS }
+
+        val currentPrimary = primary[movementType]
+
+        if (currentPrimary == null) {
+            spawnFreshPrimary(gpsPoint, movementType, index, now)
+            return
+        }
+
+        val reachable = getReachableSegments(currentPrimary.lastSegment, index)
+
+        val bestForPrimary: Segment? = reachable
+            .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
+            .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
+
+        val distToPrimary = bestForPrimary
+            ?.let { pointToSegmentDistance(gpsPoint, it) }
+            ?: Double.MAX_VALUE
+
+        if (distToPrimary < MAX_CONTINUITY_DISTANCE) {
+            currentPrimary.missCount = 0
+            currentPrimary.pointCount++
+            currentPrimary.score += distToPrimary
+            currentPrimary.timestamp = now
+
+            if (bestForPrimary !== currentPrimary.lastSegment) {
+                extendChain(currentPrimary.chain, bestForPrimary!!, currentPrimary.chain.points.last())
+                currentPrimary.lastSegment = bestForPrimary
+            }
+
+            // Spawn backups at direct junctions
+            if (bkps.size < MAX_BACKUPS) {
+                val directConnected = index.connectedSegments(currentPrimary.lastSegment).toSet()
+                val alternatives = directConnected
+                    .filter { seg ->
+                        seg !== bestForPrimary &&
+                                pointToSegmentDistance(gpsPoint, seg) < MAX_CONTINUITY_DISTANCE * 1.5 &&
+                                bkps.none { it.lastSegment === seg }
+                    }
+                    .sortedBy { pointToSegmentDistance(gpsPoint, it) }
+                    .take(MAX_BACKUPS - bkps.size)
+
+                for (alt in alternatives) {
+                    val backupChain = PathChain(
+                        id = nextChainId++,
+                        movementType = movementType,
+                        points = ArrayDeque(currentPrimary.chain.points.toList()),
+                        dirty = true
+                    )
+                    extendChain(backupChain, alt, backupChain.points.last())
+                    bkps.add(PathHypothesis(
+                        id = nextHypId++,
+                        chain = backupChain,
+                        lastSegment = alt,
+                        timestamp = now,
+                        score = currentPrimary.score,
+                        pointCount = currentPrimary.pointCount
+                    ))
+                }
+            }
+
+            bkps.removeAll { backup ->
+                getReachableSegments(backup.lastSegment, index)
+                    .none { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE * 2.0 }
+            }
+
+        } else {
+            currentPrimary.missCount++
+
+            // Hard reset — GPS has genuinely moved far away
+            if (currentPrimary.missCount >= HARD_RESET_THRESHOLD) {
+                removePrimary(movementType)
+                bkps.clear()
+                spawnFreshPrimary(gpsPoint, movementType, index, now)
+                return
+            }
+
+            // Advance backups
+            for (backup in bkps) {
+                val backupReachable = getReachableSegments(backup.lastSegment, index)
+                val bestForBackup: Segment? = backupReachable
+                    .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
+                    .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
+
+                if (bestForBackup != null) {
+                    backup.pointCount++
+                    backup.score += pointToSegmentDistance(gpsPoint, bestForBackup)
+                    backup.timestamp = now
+                    if (bestForBackup !== backup.lastSegment) {
+                        extendChain(backup.chain, bestForBackup, backup.chain.points.last())
+                        backup.lastSegment = bestForBackup
+                    }
+                    backup.missCount = 0
+                } else {
+                    backup.missCount++
+                }
+            }
+
+            bkps.removeAll { it.missCount >= MISS_THRESHOLD }
+
+            if (currentPrimary.missCount >= MISS_THRESHOLD) {
+                val bestBackup = bkps
+                    .filter { it.pointCount > 0 }
+                    .minByOrNull { it.score / it.pointCount }
+
+                if (bestBackup != null) {
+                    removePrimary(movementType)
+                    bkps.remove(bestBackup)
+                    chains[movementType]?.add(bestBackup.chain)
+                    primary[movementType] = bestBackup
+                    bestBackup.missCount = 0
+                }
+                // else: wait for hard reset
+            }
+        }
+
+        modifiedMovementTypes.add(movementType)
+        onChainsChanged?.invoke()
+    }
+
+    // Simple BFS returning reachable set (no path tracing needed)
+    private fun getReachableSegments(start: Segment, index: SegmentIndex): Set<Segment> {
+        val visited = mutableSetOf<Segment>()
+        val queue   = ArrayDeque<Pair<Segment, Double>>()
+        queue.add(Pair(start, 0.0))
+        while (queue.isNotEmpty()) {
+            val (seg, dist) = queue.removeFirst()
+            if (!visited.add(seg)) continue
+            if (dist > BFS_SEARCH_DISTANCE) continue
+            val segLen = seg.startingPoint.distanceTo(seg.endingPoint)
+            for (connected in index.connectedSegments(seg)) {
+                if (connected !in visited) queue.add(Pair(connected, dist + segLen))
+            }
+        }
+        return visited
+    }
+
+    /* ── Helpers ── */
+    private fun removePrimary(movementType: MovementType) {
+        val pri = primary.remove(movementType) ?: return
+        chains[movementType]?.remove(pri.chain)
+        onChainRemoved?.invoke(pri.chain.id)
+    }
+
+    private fun highwayPenalty(highway: String): Double = when (highway) {
+        "trunk", "trunk_link",
+        "primary", "primary_link",
+        "secondary", "secondary_link",
+        "tertiary", "tertiary_link"   -> 0.0
+        "residential", "unclassified",
+        "living_street"               -> 0.0001
+        "path", "track",
+        "pedestrian", "steps"         -> 0.0002
+        "service"                     -> 0.0005
+        else                          -> 0.0001
+    }
+
+    private fun LatLong.matchesEndpoint(other: LatLong): Boolean =
+        distanceTo(other) < 0.00005
+
+
+    /* ── recordSegment (for replay) ── */
+
+    @Synchronized
+    fun recordSegment(segment: Segment, movementType: MovementType): PathChain {
+        val movementChains = chains[movementType]!!
+        val segStart = segment.startingPoint
+        val segEnd   = segment.endingPoint
+
+        var headChain: PathChain? = null
+        var tailChain: PathChain? = null
+        var headIsReversed = false
+        var tailIsReversed = false
+
+        for (chain in movementChains) {
+            when {
+                chain.points.last().matchesEndpoint(segStart)  -> { headChain = chain; headIsReversed = false }
+                chain.points.first().matchesEndpoint(segEnd)   -> { tailChain = chain; tailIsReversed = false }
+                chain.points.last().matchesEndpoint(segEnd)    -> { headChain = chain; headIsReversed = true  }
+                chain.points.first().matchesEndpoint(segStart) -> { tailChain = chain; tailIsReversed = true  }
+            }
+        }
+
+        modifiedMovementTypes.add(movementType)
+
+        val result: PathChain = when {
+            headChain != null && tailChain != null && headChain !== tailChain -> {
+                headChain.points.addLast(if (headIsReversed) segStart else segEnd)
+                headChain.dirty = true
+                val tailPoints = if (tailIsReversed) tailChain.points.reversed()
+                else tailChain.points.toList()
+                tailPoints.forEach { headChain.points.addLast(it) }
+                movementChains.remove(tailChain)
+                onChainRemoved?.invoke(tailChain.id)
+                headChain
+            }
+            headChain != null -> {
+                headChain.points.addLast(if (headIsReversed) segStart else segEnd)
+                headChain.dirty = true
+                headChain
+            }
+            tailChain != null -> {
+                tailChain.points.addFirst(if (tailIsReversed) segEnd else segStart)
+                tailChain.dirty = true
+                tailChain
+            }
+            else -> {
+                val c = PathChain(
+                    id = nextChainId++,
+                    movementType = movementType,
+                    points = ArrayDeque(listOf(segStart, segEnd)),
+                    dirty = true
+                )
+                movementChains.add(c)
+                c
+            }
+        }
+        onChainsChanged?.invoke()
+        return result
+    }
+
+
+    /* ── Clear / finalize ── */
+
+    fun clearSegments() {
+        for (movementType in MovementType.entries) {
+            chains[movementType]?.forEach { onChainRemoved?.invoke(it.id) }
+            chains[movementType]?.clear()
+        }
+        modifiedMovementTypes.clear()
+        primary.clear()
+        backups.clear()
+        onChainsChanged?.invoke()
+    }
+
+    fun isEmpty(): Boolean = MovementType.entries.all { chains[it].isNullOrEmpty() }
+
+    @Synchronized
+    fun finalizeSession() {
+        primary.clear()
+        backups.clear()
+        modifiedMovementTypes.clear()
+    }
+
+    fun runFinalization(movementType: MovementType) {
+        // No gap merge — causes false parallel connections
+    }
+
+
+    /* ── Persistence ── */
 
     @Synchronized
     fun save(context: Context) {
@@ -277,46 +606,22 @@ class PathStorage () {
                 )
             }
         }
-        val text = json.encodeToString(StoredChainCollection(snapshot))
-        val file = File(context.filesDir, FILE_NAME)
-        val tempFile = File(context.filesDir, "$FILE_NAME.tmp")
-        tempFile.writeText(text)
+        val text    = json.encodeToString(StoredChainCollection(snapshot))
+        val file    = File(context.filesDir, FILE_NAME)
+        val tmpFile = File(context.filesDir, "$FILE_NAME.tmp")
+        tmpFile.writeText(text)
         if (file.exists()) file.delete()
-        tempFile.renameTo(file)
-        /*val collection = StoredChainCollection(
-            entries = chains.entries.map { (movementType, list) ->
-                StoredMovementEntry(
-                    movementType = movementType,
-                    chains = list.map { chain ->
-                        StoredPathChain(
-                            id = chain.id,
-                            movementType = chain.movementType,
-                            points = chain.points.map { StoredPoint(it.latitude, it.longitude) }
-                        )
-                    }
-                )
-            }
-        )
-
-        val text = json.encodeToString(collection)
-        val file = File(context.filesDir, FILE_NAME)
-        val tempFile = File(context.filesDir, "$FILE_NAME.tmp")
-        tempFile.writeText(text)
-        if (file.exists()) file.delete()
-        tempFile.renameTo(file)*/
+        tmpFile.renameTo(file)
     }
 
     @Synchronized
     fun load(context: Context) {
         val file = File(context.filesDir, FILE_NAME)
         if (!file.exists()) return
-
         try {
             val text = file.readText()
             val collection = json.decodeFromString<StoredChainCollection>(text)
-
             clearSegments()
-
             for (entry in collection.entries) {
                 chains[entry.movementType]?.addAll(
                     entry.chains.map { stored ->
@@ -329,13 +634,10 @@ class PathStorage () {
                     }
                 )
             }
-
             nextChainId = chains.values.flatten().maxOfOrNull { it.id + 1 } ?: 0L
             onChainsChanged?.invoke()
-
         } catch (e: Exception) {
             e.printStackTrace()
-            // Corrupt file — delete and start fresh
             deleteSaved(context)
         }
     }
@@ -345,281 +647,11 @@ class PathStorage () {
         File(context.filesDir, "$FILE_NAME.tmp").delete()
     }
 
-    private fun emptyChains(): MutableMap<MovementType, MutableList<PathChain>> {
-        return MovementType.entries
-            .associateWith { mutableListOf<PathChain>() }
-            .toMutableMap()
-    }
+    fun totalPointCount(): Int =
+        chains.values.sumOf { list -> list.sumOf { it.points.size } }
 
-    /* Save a segment */
-    @Synchronized
-    fun recordSegment(segment: Segment, movementType: MovementType): PathChain {
-        val movementChains = chains[movementType]!!
-        val segStart = segment.startingPoint
-        val segEnd   = segment.endingPoint
-
-        // For creating the result:
-        var headChain: PathChain? = null
-        var tailChain: PathChain? = null
-        var headIsReversed = false
-        var tailIsReversed = false
-
-        for (chain in movementChains) {
-            when {
-                // Tail connects to head -> can be merged in order (not reversed):
-                chain.points.last()  == segStart -> { headChain = chain; headIsReversed = false }
-                chain.points.first() == segEnd   -> { tailChain = chain; tailIsReversed = false }
-                // Tail connects to tail or head to head -> must be reversed to merge:
-                chain.points.last()  == segEnd   -> { headChain = chain; headIsReversed = true  }
-                chain.points.first() == segStart -> { tailChain = chain; tailIsReversed = true  }
-            }
-        }
-
-        modifiedMovementTypes.add(movementType)
-        val result = when {
-            // Case 1: Both ends connect two different chains -> merge them
-            headChain != null && tailChain != null && headChain !== tailChain -> {
-                headChain.points.addLast(if (headIsReversed) segStart else segEnd)
-                headChain.dirty = true
-                val tailPoints = if (tailIsReversed) tailChain.points.reversed()  else tailChain.points.toList()
-                tailPoints.forEach { headChain.points.addLast(it) }
-                movementChains.remove(tailChain)
-                onChainRemoved?.invoke(tailChain.id)
-                headChain
-            }
-
-            // Case 2: One end connects to an existing chain -> merge them
-            headChain != null -> {
-                headChain.points.addLast(if (headIsReversed) segStart else segEnd)
-                headChain.dirty = true
-                headChain
-            }
-            tailChain != null -> {
-                tailChain.points.addFirst(if (tailIsReversed) segEnd else segStart)
-                tailChain.dirty = true
-                tailChain
-            }
-
-            // Case 3: No connection -> make it new chain
-            else -> {
-                val c = PathChain(id = nextChainId++, movementType = movementType, points = ArrayDeque(listOf(segStart, segEnd)), dirty = true)
-                movementChains.add(c)
-                c
-            }
-        }
-        onChainsChanged?.invoke()
-        return result
-
-    }
-
-
-    /* Delete all segments */
-    fun clearSegments(){
-        for (movementType in MovementType.entries){
-            chains[movementType]?.forEach { onChainRemoved?.invoke(it.id) }
-            chains[movementType]?.clear()
-        }
-
-        modifiedMovementTypes.clear()
-        liveTails.clear()
-        onChainsChanged?.invoke()
-    }
-
-    fun isEmpty(): Boolean {
-        return MovementType.entries.all { movementType ->
-            chains[movementType].isNullOrEmpty()
-        }
-    }
-
-    /*
-    FOR CONTINUOUS DRAWING:
-    ALWAYS STORE THE LAST POINT WITH ACCESS TIME (IS THE TAIL OF THE CURRENT PATH); THEN COMPARE DISTANCE AND TIME TO CURRENT POINT (WITH CUTOFF) => IF CLOSE ENOUGH BRIDGE (NEW BECOMES NEW TAIL)
-    - DIFFERENCE TO CURRENT: CURRENT ONLY BRIDGES DURING SESSION END, WHAT ABOUT LIVE TRACING GAPS?
-    - CHALLENGE: BRIDGE HOW?
-    */
-    @Synchronized
-    fun onGpsPoint(segment: Segment, movementType: MovementType, index: SegmentIndex) {
-        val segStart = segment.startingPoint
-        val segEnd   = segment.endingPoint
-        val now = System.currentTimeMillis()
-        val tail = liveTails[movementType]
-
-        val bestSegment = if (tail?.lastSegment != null && now - tail.timestamp < LIVE_GAP_THRESHOLD_MS) {
-            findBestConnectedSegment(segStart, tail.lastSegment!!, index) ?: segment
-        } else {
-            segment
-        }
-
-        val bestStart = bestSegment.startingPoint
-        val bestEnd   = bestSegment.endingPoint
-
-        when {
-            tail == null || now - tail.timestamp > LIVE_GAP_THRESHOLD_MS ||
-                    tail.point.distanceTo(bestStart) > LIVE_GAP_THRESHOLD_DEGREES -> {
-                val affectedChain = recordSegment(bestSegment, movementType)
-                liveTails[movementType] = LiveTail(bestEnd, affectedChain, now, bestSegment)
-            }
-            else -> {
-                val appendStart = tail.point.distanceTo(bestStart) <= tail.point.distanceTo(bestEnd)
-                if (appendStart) {
-                    if (tail.point.distanceTo(bestStart) > 0.00001) tail.chain.points.addLast(bestStart)
-                    tail.chain.points.addLast(bestEnd)
-                    liveTails[movementType] = LiveTail(bestEnd, tail.chain, now, bestSegment)
-                } else {
-                    if (tail.point.distanceTo(bestEnd) > 0.00001) tail.chain.points.addLast(bestEnd)
-                    tail.chain.points.addLast(bestStart)
-                    liveTails[movementType] = LiveTail(bestStart, tail.chain, now, bestSegment)
-                }
-                tail.chain.dirty = true
-                modifiedMovementTypes.add(movementType)
-                onChainsChanged?.invoke()
-            }
-        }
-    }
-
-    private fun findBestConnectedSegment(gpsPoint: LatLong, lastSegment: Segment, index: SegmentIndex): Segment? {
-        val visited = mutableSetOf<Segment>()
-        var frontier = listOf(lastSegment)
-        val options = mutableListOf<Segment>()
-
-        repeat(CONTINUITY_SEARCH_RADIUS){
-            val next = mutableListOf<Segment>()
-            for (segment in frontier){
-                if (!visited.add(segment)) continue
-                options.add(segment)
-                next += index.connectedSegments(segment)
-            }
-            frontier = next
-        }
-
-        val best = options.minByOrNull { pointToSegmentDistance(gpsPoint, it) } ?: return null
-        val dist = pointToSegmentDistance(gpsPoint, best)
-
-
-        return if (dist < MAX_CONTINUITY_DISTANCE) best else null
-    }
-
-
-    /* At the end of a session */
-    @Synchronized
-    fun finalizeSession(){
-        modifiedMovementTypes.clear()
-        liveTails.clear()
-    }
-
-
-    /* HELPERS */
-    private fun mergeWithOverlapCheck(chainA: PathChain, chainB: PathChain, thresholdDegrees: Double = 0.00005) {       // (2): Append chainB onto chainA, skipping leading points that overlap chainA's tail
-        val aEnd = chainA.points.last()
-        var startIndex = 0
-        // Skip points in B that are still "on top of" A's last point
-        for (i in chainB.points.indices) {
-            if (chainB.points[i].distanceTo(aEnd) < thresholdDegrees) startIndex = i + 1
-            else break
-        }
-        for (i in startIndex until chainB.points.size) {
-            chainA.points.addLast(chainB.points[i])
-        }
-    }
-
-    fun runGapMerge(movementType: MovementType, threshold: Double = 0.0002) {       // (1): Full gap merge with overlap + reversal handling
-        val chainList = chains[movementType]!!
-        if (chainList.size < 2) return
-
-        // Quantize to grid cells of size `threshold`
-        fun quantize(v: Double) = (v / threshold).toLong()
-        fun LatLong.key() = Pair(quantize(latitude), quantize(longitude))
-
-        // Each endpoint slot: which chain owns it, and which end
-        data class EndpointSlot(val chain: PathChain, val isHead: Boolean)
-
-        fun buildIndex(): HashMap<Pair<Long, Long>, EndpointSlot> {
-            val index = HashMap<Pair<Long, Long>, EndpointSlot>()
-            for (chain in chainList) {
-                index[chain.points.first().key()] = EndpointSlot(chain, isHead = true)
-                index[chain.points.last().key()]  = EndpointSlot(chain, isHead = false)
-            }
-            return index
-        }
-
-        // Check neighboring cells too, since two points can be within `threshold` distance but quantize to adjacent cells
-        fun lookupNearby(index: HashMap<Pair<Long, Long>, EndpointSlot>, key: Pair<Long, Long>): EndpointSlot? {
-            for (dx in -1..1) for (dy in -1..1) {
-                val candidate = index[Pair(key.first + dx, key.second + dy)]
-                if (candidate != null) return candidate
-            }
-            return null
-        }
-
-        var merged = true
-        while (merged) {
-            merged = false
-            val index = buildIndex()
-
-            for (chain in chainList.toList()) {
-                if (!chainList.contains(chain)) continue
-
-                val aEnd   = chain.points.last()
-                val aStart = chain.points.first()
-
-                // Try to match chain's tail to any other chain's endpoint
-                val matchFromTail = lookupNearby(index, aEnd.key())
-                    ?.takeIf { it.chain !== chain }
-
-                // Try to match chain's head to any other chain's endpoint
-                val matchFromHead = lookupNearby(index, aStart.key())
-                    ?.takeIf { it.chain !== chain }
-
-                val matchingEndpoint = matchFromTail ?: matchFromHead ?: continue
-                val isTailMatch = matchFromTail != null
-
-                val a = chain
-                val b = matchingEndpoint.chain
-
-                when {
-                    // a's tail matched b's head → append b onto a as-is
-                    isTailMatch && matchingEndpoint.isHead -> {
-                        mergeWithOverlapCheck(a, b, threshold)      // (2)
-                        chainList.remove(b)
-                        onChainRemoved?.invoke(b.id)
-                        a.dirty = true
-                    }
-                    // a's tail matched b's tail → flip b then append
-                    isTailMatch && !matchingEndpoint.isHead -> {
-                        val flipped = PathChain(b.id, b.movementType,ArrayDeque(b.points.reversed()), dirty = true)
-                        mergeWithOverlapCheck(a, flipped, threshold)
-                        chainList.remove(b)
-                        onChainRemoved?.invoke(b.id)
-                        a.dirty = true
-                    }
-                    // a's head matched b's tail → append a onto b
-                    !isTailMatch && !matchingEndpoint.isHead -> {
-                        mergeWithOverlapCheck(b, a, threshold)
-                        chainList.remove(a)
-                        onChainRemoved?.invoke(a.id)
-                        b.dirty = true
-                    }
-                    // a's head matched b's head → flip a then append onto b
-                    !isTailMatch && matchingEndpoint.isHead -> {
-                        val flipped = PathChain(a.id, a.movementType,ArrayDeque(a.points.reversed()), dirty = true)
-                        mergeWithOverlapCheck(b, flipped, threshold)
-                        chainList.remove(a)
-                        onChainRemoved?.invoke(a.id)
-                        b.dirty = true
-                    }
-                }
-
-                merged = true
-                break  // index is stale after any merge, rebuild
-            }
-        }
-    }
-
-    fun totalPointCount(): Int {
-        return chains.values.sumOf { chainList ->
-            chainList.sumOf { chain -> chain.points.size }
-        }
-    }
+    fun refreshHasChains(): Boolean =
+        chains.values.any { it.isNotEmpty() }
 }
 
 
@@ -629,6 +661,10 @@ fun LatLong.distanceTo(other: LatLong): Double {
     val dx = longitude - other.longitude
     val dy = latitude  - other.latitude
     return Math.sqrt(dx * dx + dy * dy)
+}
+
+private fun LatLong.matchesEndpoint(other: LatLong): Boolean {
+    return distanceTo(other) < 0.00005  // ~2m — same OSM node
 }
 
 /** Returns the index of the point in this deque closest to [target]. */

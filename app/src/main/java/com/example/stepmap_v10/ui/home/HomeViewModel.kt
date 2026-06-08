@@ -100,8 +100,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val index = AppSegmentIndex.instance ?: return@loadAndReplay
                 val nearest = findNearestSegment(lat, lon, index) ?: return@loadAndReplay
                 val dist = pointToSegmentDistance(LatLong(lat, lon), nearest)
-                if (dist < 0.0003) {
-                    pathStorage.onGpsPoint(nearest, movementType, index)
+                if (dist < 0.0006) {
+                    pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
                 }
             }
             /*val filePoints = routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType ->

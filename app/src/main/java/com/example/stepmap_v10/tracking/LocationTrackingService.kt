@@ -219,14 +219,14 @@ class LocationTrackingService: Service() {
                 LatLong(location.latitude, location.longitude), nearest
             )
 
-            if (dist < 0.0003) {
+            if (dist < 0.0006) {
                 val effectiveType = if (movementType != MovementType.STILL) {
                     storage.lastActiveMovementType = movementType
                     movementType
                 } else {
                     storage.lastActiveMovementType
                 }
-                storage.onGpsPoint(nearest, effectiveType, index)
+                storage.onGpsPoint(LatLong(location.latitude, location.longitude), effectiveType, index)
             }
             /*if (dist < 0.0003 && movementType != MovementType.STILL) {
                 Log.d("StepByStep_v1.0_TAG", "Segment found")
