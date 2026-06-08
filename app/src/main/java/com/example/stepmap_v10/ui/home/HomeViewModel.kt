@@ -100,35 +100,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val index = AppSegmentIndex.instance ?: return@loadAndReplay
                 val nearest = findNearestSegment(lat, lon, index) ?: return@loadAndReplay
                 val dist = pointToSegmentDistance(LatLong(lat, lon), nearest)
-
                 if (dist < 0.0003) {
-                    val effectiveType = if (movementType != MovementType.STILL) {
-                        lastNonStillType = movementType
-                        movementType
-                    } else {
-                        // Only inherit last type if position is actually changing
-                        val pLat = prevLat; val pLon = prevLon; val pTime = prevTimestamp
-                        if (pLat != null && pLon != null && pTime != null && timestamp > pTime) {
-                            val dLat = lat - pLat; val dLon = lon - pLon
-                            val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
-                            val timeSec = (timestamp - pTime) / 1000.0
-                            val speedKmh = if (timeSec > 0) (distMeters / timeSec) * 3.6 else 0.0
-                            if (speedKmh > 2.0) {
-                                // Moving but GPS says STILL — use last known type
-                                lastNonStillType
-                            } else {
-                                // Genuinely stationary — drop
-                                null
-                            }
-                        } else null
-                    }
-
-                    if (effectiveType != null) {
-                        pathStorage.onGpsPoint(nearest, effectiveType, index)
-                    }
+                    pathStorage.onGpsPoint(nearest, movementType, index)
                 }
-
-                prevLat = lat; prevLon = lon; prevTimestamp = timestamp
             }
             /*val filePoints = routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType ->
                 val index = AppSegmentIndex.instance ?: return@loadAndReplay

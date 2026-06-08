@@ -154,18 +154,10 @@ fun getOutsideAmount(center: LatLong): Double {
 
 /* HELPER FUNCTIONS */
 fun copyAssetToInternalStorage(context: Context, assetName: String): String {
-    """ Copies a file into the device's internal storage """
-
-    // Create the file/directory
     val outFile = File(context.filesDir, assetName)
-
-    // Copy the file over
-    if (!outFile.exists() || outFile.length() == 0L) {
-        context.assets.open(assetName).use { input ->
-            outFile.outputStream().use { output -> input.copyTo(output) }
-        }
+    // Always copy — ensures updated assets are used
+    context.assets.open(assetName).use { input ->
+        outFile.outputStream().use { output -> input.copyTo(output) }
     }
-
-    // Return the copied file
     return outFile.absolutePath
 }

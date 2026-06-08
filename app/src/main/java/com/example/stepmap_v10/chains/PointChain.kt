@@ -503,17 +503,8 @@ class PathStorage () {
     /* At the end of a session */
     @Synchronized
     fun finalizeSession(){
-        for (movementType in modifiedMovementTypes){     // TODO: Call for each MODIFIED MovementType
-            runFinalization(movementType)
-        }
-
         modifiedMovementTypes.clear()
         liveTails.clear()
-    }
-
-    fun runFinalization(movementType: MovementType) {
-        runGapMerge(movementType)       // (1) => second pass for newly exposed gaps
-        runGapMerge(movementType)
     }
 
 
