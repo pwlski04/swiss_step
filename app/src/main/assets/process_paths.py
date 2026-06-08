@@ -14,17 +14,18 @@ wanted = {
     "unclassified",
     "tertiary",
     "tertiary_link",
-}
 
-"""
-bigger roads for transport (later):
+    #bigger roads for transport:
     "secondary",
     "secondary_link",
     "primary",
     "primary_link",
     "trunk",
     "trunk_link",
- """
+
+    # tram tracks if mapped separately
+    "tram",
+}
 
 walkable_streets = {
     "footway",
@@ -131,7 +132,7 @@ for feature in data["features"]:
         for line in coords:
             paths.append({
                 "id": len(paths),
-                "points": coords,
+                "points": line, # was coords,
                 "highway": highway,
                 "walkable": walkable,
                 "drivable": drivable

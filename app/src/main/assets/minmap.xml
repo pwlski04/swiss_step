@@ -26,6 +26,11 @@
         <line stroke="#DDDDDD" stroke-width="1.0" />
     </rule>
 
+    <!-- tram tracks -->
+    <rule e="way" k="highway" v="tram">
+        <line stroke="#CDCDCD" stroke-width="0.8" />
+    </rule>
+
     <!-- drivable larger roads -->
     <rule e="way" k="highway" v="secondary|secondary_link|primary|primary_link|trunk|trunk_link">
         <line stroke="#E6E6FA" stroke-width="1.0" />
