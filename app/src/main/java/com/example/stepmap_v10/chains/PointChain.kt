@@ -68,6 +68,47 @@ data class StoredPoint(
 )
 
 //TODO: REMOVE
+class RawGpsPointsLayer(
+    private val context: Context,
+    private val fileName: String
+) : Layer() {
+
+    private val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+        setColor(android.graphics.Color.GREEN)
+        setStrokeWidth(1f)
+    }
+
+    private var rawPoints: List<Pair<Double, Double>> = emptyList()
+
+    fun loadPoints() {
+        val json = Json { ignoreUnknownKeys = true }
+        val text = File(context.filesDir, fileName).readText()
+        val route = json.decodeFromString<RecordedRoute>(text)
+        rawPoints = route.points.map { Pair(it.lat, it.lon) }
+    }
+
+    override fun draw(
+        boundingBox: BoundingBox,
+        zoomLevel: Byte,
+        canvas: Canvas,
+        topLeftPoint: Point,
+        rotation: Rotation
+    ) {
+        val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
+
+        for ((lat, lon) in rawPoints) {
+            val pixelX = MercatorProjection.longitudeToPixelX(lon, mapSize)
+            val pixelY = MercatorProjection.latitudeToPixelY(lat, mapSize)
+            val screenX = (pixelX - topLeftPoint.x).toInt()
+            val screenY = (pixelY - topLeftPoint.y).toInt()
+
+            if (screenX < -10 || screenX > canvas.width + 10 ||
+                screenY < -10 || screenY > canvas.height + 10) continue
+
+            canvas.drawCircle(screenX, screenY, 4, paint)
+        }
+    }
+}
 class DebugPointsLayer(private val pathStorage: PathStorage) : Layer() {
 
     private val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {

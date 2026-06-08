@@ -28,6 +28,7 @@ import com.example.stepmap_v10.tracking.TrackingLiveState
 import com.example.stepmap_v10.tracking.loadIsDrawing
 import com.example.stepmap_v10.chains.AppRouteRecorder
 import com.example.stepmap_v10.chains.DebugPointsLayer
+import com.example.stepmap_v10.chains.RawGpsPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
 import com.example.stepmap_v10.tracking.MovementType
 import kotlinx.coroutines.Job
@@ -71,6 +72,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             var prevLat: Double? = null
             var prevLon: Double? = null
             var prevTimestamp: Long? = null
+
+            /* START */
+            // Add this to replayRoute before the loadAndReplay loop:
+            val rawRoute = routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp -> }
+            Log.d("StepByStep_v1.0_TAG", "REPLAY: Raw points in file: $rawRoute")
+
+// Also log the time gaps between consecutive points:
+            var prevTimestamp2: Long? = null
+            var maxGap = 0L
+            var gapCount = 0
+
+            routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
+                val prev = prevTimestamp2
+                if (prev != null) {
+                    val gap = timestamp - prev
+                    if (gap > maxGap) maxGap = gap
+                    if (gap > 10_000L) gapCount++  // gaps > 10 seconds
+                }
+                prevTimestamp2 = timestamp
+            }
+
+            Log.d("StepByStep_v1.0_TAG", "REPLAY: Max time gap: ${maxGap/1000}s, Gaps > 10s: $gapCount")
+            /* END */
 
             val filePoints = routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
                 val index = AppSegmentIndex.instance ?: return@loadAndReplay
@@ -138,6 +162,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
             // Single redraw after all points processed
             withContext(Dispatchers.Main) {
+                val rawLayer = RawGpsPointsLayer(context, fileName)
+                rawLayer.loadPoints()
+                sharedMapView?.layerManager?.layers?.add(rawLayer)
                 val chainDetails = pathStorage.chains.entries
                     .filter { it.value.isNotEmpty() }
                     .map { (type, chains) -> "$type: ${chains.size} chains, sizes: ${chains.map { it.points.size }}" }
@@ -151,6 +178,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         pointCount / chainCount.coerceAtLeast(1)
                     }"
                 )
+
 
                 // ADD BACK pathStorage.finalizeSession()
                 saveChainsNow()
