@@ -65,13 +65,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         isReplayingRoute = true
         viewModelScope.launch(Dispatchers.Default) {
             pathStorage.clearSegments()
+            var pointCount = 0
+            routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
+                val index = AppSegmentIndex.instance ?: return@loadAndReplay
+                pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
+                pointCount++
+                // Redraw every 5 points to show progressive drawing
+                if (pointCount % 5 == 0) {
+                    launch(Dispatchers.Main) {
+                        sharedMapView?.layerManager?.redrawLayers()
+                    }
+                }
+            }
+            withContext(Dispatchers.Main) {
+                sharedMapView?.layerManager?.redrawLayers()
+                isReplayingRoute = false
+            }
+        }
+    }
+    /*fun replayRoute(context: Context, fileName: String) {
+        isReplayingRoute = true
+        viewModelScope.launch(Dispatchers.Default) {
+            pathStorage.clearSegments()
             val before = pathStorage.totalPointCount()
             Log.d("StepByStep_v1.0_TAG", "REPLAY: Points before replay: $before")
-
-            var lastNonStillType: MovementType = MovementType.TRANSPORT
-            var prevLat: Double? = null
-            var prevLon: Double? = null
-            var prevTimestamp: Long? = null
 
             /* START */
             // Add this to replayRoute before the loadAndReplay loop:
@@ -160,7 +177,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 isReplayingRoute = false
             }
         }
-    }
+    }*/
 
 
     init {

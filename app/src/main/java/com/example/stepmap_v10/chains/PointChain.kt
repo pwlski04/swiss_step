@@ -33,14 +33,6 @@ data class PathChain(
     var dirty: Boolean = true
 )
 
-data class LiveTail(
-    /* Saves the most recent tail during live tracking */
-    val point: LatLong,
-    val chain: PathChain,
-    val timestamp: Long,  // System.currentTimeMillis()
-    val lastSegment: Segment?
-)
-
 @Serializable
 data class StoredChainCollection(
     val entries: List<StoredMovementEntry>
@@ -73,7 +65,8 @@ private data class PathHypothesis(
     var timestamp: Long,
     var score: Double = 0.0,
     var missCount: Int = 0,
-    var pointCount: Int = 0
+    var pointCount: Int = 0,
+    val segmentHistory: ArrayDeque<Pair<Segment, Int>> = ArrayDeque()
 )
 
 //TODO: REMOVE
@@ -286,7 +279,7 @@ class PathStorage {
             .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
             ?: return
 
-        // Orient chain based on which end GPS is closer to
+        // Orient chain so GPS-closest end comes first
         val distToStart = gpsPoint.distanceTo(nearest.startingPoint)
         val distToEnd   = gpsPoint.distanceTo(nearest.endingPoint)
         val (first, second) = if (distToStart <= distToEnd)
@@ -301,17 +294,76 @@ class PathStorage {
             dirty = true
         )
         chains[movementType]?.add(chain)
-        primary[movementType] = PathHypothesis(
+        val hyp = PathHypothesis(
             id = nextHypId++,
             chain = chain,
             lastSegment = nearest,
             timestamp = now
         )
+        hyp.segmentHistory.addLast(Pair(nearest, chain.points.size))
+        primary[movementType] = hyp
         modifiedMovementTypes.add(movementType)
         onChainsChanged?.invoke()
     }
 
-    // 2. Back to simple extendChain (no path tracing)
+    private fun extendChainWithPath(
+        chain: PathChain,
+        parentMap: Map<Segment, Segment?>,
+        target: Segment,
+        lastPointIn: LatLong
+    ) {
+        val path = mutableListOf<Segment>()
+        var current: Segment? = target
+        while (current != null && parentMap[current] != null) {
+            path.add(0, current)
+            current = parentMap[current]
+        }
+
+        var lastPoint = lastPointIn
+        for (seg in path) {
+            val s = seg.startingPoint
+            val e = seg.endingPoint
+            val appendStart = lastPoint.distanceTo(s) <= lastPoint.distanceTo(e)
+            if (appendStart) {
+                if (lastPoint.distanceTo(s) > 0.00001) chain.points.addLast(s)
+                chain.points.addLast(e)
+                lastPoint = e
+            } else {
+                if (lastPoint.distanceTo(e) > 0.00001) chain.points.addLast(e)
+                chain.points.addLast(s)
+                lastPoint = s
+            }
+
+            // Remove A→B→A spike: if last point equals third-to-last, we went backwards
+            while (chain.points.size >= 3) {
+                val n = chain.points.size
+                if (chain.points[n - 1].distanceTo(chain.points[n - 3]) < 0.00002) {
+                    chain.points.removeAt(n - 1)
+                    chain.points.removeAt(n - 2)
+                    if (chain.points.isNotEmpty()) {
+                        lastPoint = chain.points.last()
+                    }
+                } else break
+            }
+
+            // Remove A→B→C→A triangle: if last point revisits an earlier point
+            if (chain.points.size >= 4) {
+                val last = chain.points.last()
+                val searchFrom = maxOf(0, chain.points.size - 8)
+                val revisitIdx = (searchFrom until chain.points.size - 1)
+                    .lastOrNull { chain.points[it].distanceTo(last) < 0.00002 }
+                if (revisitIdx != null) {
+                    while (chain.points.size > revisitIdx + 1) {
+                        chain.points.removeLast()
+                    }
+                    if (chain.points.isNotEmpty()) lastPoint = chain.points.last()
+                }
+            }
+        }
+        chain.dirty = true
+    }
+
+    // Simple single-segment extend (for backups at junctions — always direct neighbor)
     private fun extendChain(chain: PathChain, segment: Segment, lastPoint: LatLong) {
         val s = segment.startingPoint
         val e = segment.endingPoint
@@ -341,15 +393,15 @@ class PathStorage {
         bkps.removeAll { now - it.timestamp > LIVE_GAP_THRESHOLD_MS }
 
         val currentPrimary = primary[movementType]
-
         if (currentPrimary == null) {
             spawnFreshPrimary(gpsPoint, movementType, index, now)
             return
         }
 
-        val reachable = getReachableSegments(currentPrimary.lastSegment, index)
+        // BFS with parent map so we can trace intermediate segments
+        val parentMap = getReachableSegmentsWithPath(currentPrimary.lastSegment, index)
 
-        val bestForPrimary: Segment? = reachable
+        val bestForPrimary: Segment? = parentMap.keys
             .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
             .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
 
@@ -364,11 +416,37 @@ class PathStorage {
             currentPrimary.timestamp = now
 
             if (bestForPrimary !== currentPrimary.lastSegment) {
-                extendChain(currentPrimary.chain, bestForPrimary!!, currentPrimary.chain.points.last())
-                currentPrimary.lastSegment = bestForPrimary
+                val historyEntry = currentPrimary.segmentHistory
+                    .findLast { it.first === bestForPrimary }
+
+                if (historyEntry != null) {
+                    // Revisiting a past segment — trim the wrong detour
+                    val targetLength = historyEntry.second
+                    while (currentPrimary.chain.points.size > targetLength) {
+                        currentPrimary.chain.points.removeLast()
+                    }
+                    while (currentPrimary.segmentHistory.isNotEmpty() &&
+                        currentPrimary.segmentHistory.last().second > targetLength) {
+                        currentPrimary.segmentHistory.removeLast()
+                    }
+                } else {
+                    // New segment — trace ALL intermediate road nodes, no straight lines
+                    extendChainWithPath(
+                        currentPrimary.chain, parentMap,
+                        bestForPrimary!!, currentPrimary.chain.points.last()
+                    )
+                    currentPrimary.segmentHistory.addLast(
+                        Pair(bestForPrimary, currentPrimary.chain.points.size)
+                    )
+                    if (currentPrimary.segmentHistory.size > 50) {
+                        currentPrimary.segmentHistory.removeFirst()
+                    }
+                }
+                currentPrimary.lastSegment = bestForPrimary!!
+                currentPrimary.chain.dirty = true
             }
 
-            // Spawn backups at direct junctions
+            // Spawn backups at direct junctions (single hop — no path needed)
             if (bkps.size < MAX_BACKUPS) {
                 val directConnected = index.connectedSegments(currentPrimary.lastSegment).toSet()
                 val alternatives = directConnected
@@ -388,26 +466,28 @@ class PathStorage {
                         dirty = true
                     )
                     extendChain(backupChain, alt, backupChain.points.last())
-                    bkps.add(PathHypothesis(
+                    val bHyp = PathHypothesis(
                         id = nextHypId++,
                         chain = backupChain,
                         lastSegment = alt,
                         timestamp = now,
                         score = currentPrimary.score,
                         pointCount = currentPrimary.pointCount
-                    ))
+                    )
+                    bkps.add(bHyp)
                 }
             }
 
+            // Discard backups that drifted too far
             bkps.removeAll { backup ->
-                getReachableSegments(backup.lastSegment, index)
+                getReachableSegmentsWithPath(backup.lastSegment, index).keys
                     .none { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE * 2.0 }
             }
 
         } else {
             currentPrimary.missCount++
 
-            // Hard reset — GPS has genuinely moved far away
+            // Hard reset — GPS moved far away permanently
             if (currentPrimary.missCount >= HARD_RESET_THRESHOLD) {
                 removePrimary(movementType)
                 bkps.clear()
@@ -415,10 +495,10 @@ class PathStorage {
                 return
             }
 
-            // Advance backups
+            // Advance backups using path tracing
             for (backup in bkps) {
-                val backupReachable = getReachableSegments(backup.lastSegment, index)
-                val bestForBackup: Segment? = backupReachable
+                val bParentMap = getReachableSegmentsWithPath(backup.lastSegment, index)
+                val bestForBackup: Segment? = bParentMap.keys
                     .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
                     .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
 
@@ -427,7 +507,10 @@ class PathStorage {
                     backup.score += pointToSegmentDistance(gpsPoint, bestForBackup)
                     backup.timestamp = now
                     if (bestForBackup !== backup.lastSegment) {
-                        extendChain(backup.chain, bestForBackup, backup.chain.points.last())
+                        extendChainWithPath(
+                            backup.chain, bParentMap,
+                            bestForBackup, backup.chain.points.last()
+                        )
                         backup.lastSegment = bestForBackup
                     }
                     backup.missCount = 0
@@ -450,7 +533,6 @@ class PathStorage {
                     primary[movementType] = bestBackup
                     bestBackup.missCount = 0
                 }
-                // else: wait for hard reset
             }
         }
 
@@ -458,21 +540,26 @@ class PathStorage {
         onChainsChanged?.invoke()
     }
 
-    // Simple BFS returning reachable set (no path tracing needed)
-    private fun getReachableSegments(start: Segment, index: SegmentIndex): Set<Segment> {
-        val visited = mutableSetOf<Segment>()
-        val queue   = ArrayDeque<Pair<Segment, Double>>()
+    private fun getReachableSegmentsWithPath(
+        start: Segment,
+        index: SegmentIndex
+    ): Map<Segment, Segment?> {
+        val parentMap = mutableMapOf<Segment, Segment?>()
+        val queue     = ArrayDeque<Pair<Segment, Double>>()
+        parentMap[start] = null
         queue.add(Pair(start, 0.0))
         while (queue.isNotEmpty()) {
             val (seg, dist) = queue.removeFirst()
-            if (!visited.add(seg)) continue
             if (dist > BFS_SEARCH_DISTANCE) continue
             val segLen = seg.startingPoint.distanceTo(seg.endingPoint)
             for (connected in index.connectedSegments(seg)) {
-                if (connected !in visited) queue.add(Pair(connected, dist + segLen))
+                if (connected !in parentMap) {
+                    parentMap[connected] = seg
+                    queue.add(Pair(connected, dist + segLen))
+                }
             }
         }
-        return visited
+        return parentMap
     }
 
     /* ── Helpers ── */
@@ -499,67 +586,6 @@ class PathStorage {
         distanceTo(other) < 0.00005
 
 
-    /* ── recordSegment (for replay) ── */
-
-    @Synchronized
-    fun recordSegment(segment: Segment, movementType: MovementType): PathChain {
-        val movementChains = chains[movementType]!!
-        val segStart = segment.startingPoint
-        val segEnd   = segment.endingPoint
-
-        var headChain: PathChain? = null
-        var tailChain: PathChain? = null
-        var headIsReversed = false
-        var tailIsReversed = false
-
-        for (chain in movementChains) {
-            when {
-                chain.points.last().matchesEndpoint(segStart)  -> { headChain = chain; headIsReversed = false }
-                chain.points.first().matchesEndpoint(segEnd)   -> { tailChain = chain; tailIsReversed = false }
-                chain.points.last().matchesEndpoint(segEnd)    -> { headChain = chain; headIsReversed = true  }
-                chain.points.first().matchesEndpoint(segStart) -> { tailChain = chain; tailIsReversed = true  }
-            }
-        }
-
-        modifiedMovementTypes.add(movementType)
-
-        val result: PathChain = when {
-            headChain != null && tailChain != null && headChain !== tailChain -> {
-                headChain.points.addLast(if (headIsReversed) segStart else segEnd)
-                headChain.dirty = true
-                val tailPoints = if (tailIsReversed) tailChain.points.reversed()
-                else tailChain.points.toList()
-                tailPoints.forEach { headChain.points.addLast(it) }
-                movementChains.remove(tailChain)
-                onChainRemoved?.invoke(tailChain.id)
-                headChain
-            }
-            headChain != null -> {
-                headChain.points.addLast(if (headIsReversed) segStart else segEnd)
-                headChain.dirty = true
-                headChain
-            }
-            tailChain != null -> {
-                tailChain.points.addFirst(if (tailIsReversed) segEnd else segStart)
-                tailChain.dirty = true
-                tailChain
-            }
-            else -> {
-                val c = PathChain(
-                    id = nextChainId++,
-                    movementType = movementType,
-                    points = ArrayDeque(listOf(segStart, segEnd)),
-                    dirty = true
-                )
-                movementChains.add(c)
-                c
-            }
-        }
-        onChainsChanged?.invoke()
-        return result
-    }
-
-
     /* ── Clear / finalize ── */
 
     fun clearSegments() {
@@ -582,13 +608,8 @@ class PathStorage {
         modifiedMovementTypes.clear()
     }
 
-    fun runFinalization(movementType: MovementType) {
-        // No gap merge — causes false parallel connections
-    }
-
 
     /* ── Persistence ── */
-
     @Synchronized
     fun save(context: Context) {
         val snapshot = synchronized(this) {
