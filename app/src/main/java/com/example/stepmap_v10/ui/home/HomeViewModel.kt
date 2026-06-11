@@ -2,7 +2,6 @@ package com.example.stepmap_v10.ui.home
 
 import android.app.Application
 import android.content.Context
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,19 +17,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.mapsforge.map.android.view.MapView
-//import com.example.stepMap_v10.map.LocationMarker
 import com.example.stepmap_v10.map.copyAssetToInternalStorage
-import com.example.stepmap_v10.paths.findNearestSegment
-import com.example.stepmap_v10.paths.pointToSegmentDistance
 import com.example.stepmap_v10.tracking.AppPathStorage
 import com.example.stepmap_v10.tracking.AppSegmentIndex
 import com.example.stepmap_v10.tracking.TrackingLiveState
 import com.example.stepmap_v10.tracking.loadIsDrawing
 import com.example.stepmap_v10.chains.AppRouteRecorder
 import com.example.stepmap_v10.chains.DebugPointsLayer
-import com.example.stepmap_v10.chains.RawGpsPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
-import com.example.stepmap_v10.tracking.MovementType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -83,101 +77,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    /*fun replayRoute(context: Context, fileName: String) {
-        isReplayingRoute = true
-        viewModelScope.launch(Dispatchers.Default) {
-            pathStorage.clearSegments()
-            val before = pathStorage.totalPointCount()
-            Log.d("StepByStep_v1.0_TAG", "REPLAY: Points before replay: $before")
-
-            /* START */
-            // Add this to replayRoute before the loadAndReplay loop:
-            val rawRoute = routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp -> }
-            Log.d("StepByStep_v1.0_TAG", "REPLAY: Raw points in file: $rawRoute")
-
-// Also log the time gaps between consecutive points:
-            var prevTimestamp2: Long? = null
-            var maxGap = 0L
-            var gapCount = 0
-
-            routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
-                val prev = prevTimestamp2
-                if (prev != null) {
-                    val gap = timestamp - prev
-                    if (gap > maxGap) maxGap = gap
-                    if (gap > 10_000L) gapCount++  // gaps > 10 seconds
-                }
-                prevTimestamp2 = timestamp
-            }
-
-            Log.d("StepByStep_v1.0_TAG", "REPLAY: Max time gap: ${maxGap/1000}s, Gaps > 10s: $gapCount")
-            /* END */
-
-            val filePoints = routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
-                val index = AppSegmentIndex.instance ?: return@loadAndReplay
-                val nearest = findNearestSegment(lat, lon, index) ?: return@loadAndReplay
-                val dist = pointToSegmentDistance(LatLong(lat, lon), nearest)
-                if (dist < 0.0006) {
-                    pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
-                }
-            }
-            /*val filePoints = routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType ->
-                val index = AppSegmentIndex.instance ?: return@loadAndReplay
-                val nearest = findNearestSegment(lat, lon, index) ?: return@loadAndReplay
-                val dist = pointToSegmentDistance(LatLong(lat, lon), nearest)
-                if (dist < 0.0003) {
-                    pathStorage.onGpsPoint(nearest, movementType, index)
-                }
-            }*/
-
-            // TODO: remove this (is here to confirm the path points counts for saving) and filePoints (turn loadAndReplay back to returning Unit)
-            val pointCount = pathStorage.totalPointCount()
-            android.util.Log.d("StepByStep_v1.0_TAG", "REPLAY: Total points after replay: $pointCount")
-            Log.d("StepByStep_v1.0_TAG", "REPLAY: Points in file: $filePoints, recorded into storage: ${pathStorage.totalPointCount()}")
-            val chainDetails = pathStorage.chains.entries
-                .filter { it.value.isNotEmpty() }
-                .map { (type, chains) ->
-                    "$type: ${chains.size} chains, sizes: ${chains.map { it.points.size }}"
-                }
-            Log.d("StepByStep_v1.0_TAG", "REPLAY: Chain details: $chainDetails")
-
-            // TODO REMOVE
-            withContext(Dispatchers.Default) {
-                // Run gap merge with looser threshold for replay
-                pathStorage.finalizeSession()
-                /*for (movementType in MovementType.entries) {
-                    pathStorage.runGapMerge(movementType, threshold = 0.003) // ~100m
-                    pathStorage.runGapMerge(movementType, threshold = 0.003)
-                }*/
-            }
-
-            // Single redraw after all points processed
-            withContext(Dispatchers.Main) {
-                val rawLayer = RawGpsPointsLayer(context, fileName)
-                rawLayer.loadPoints()
-                sharedMapView?.layerManager?.layers?.add(rawLayer)
-                val chainDetails = pathStorage.chains.entries
-                    .filter { it.value.isNotEmpty() }
-                    .map { (type, chains) -> "$type: ${chains.size} chains, sizes: ${chains.map { it.points.size }}" }
-                Log.d("REPLAY", "After finalize: $chainDetails")
-
-                val chainCount = pathStorage.chains.values.sumOf { it.size }
-                val pointCount = pathStorage.totalPointCount()
-                Log.d(
-                    "StepByStep_v1.0_TAG",
-                    "REPLAY: Chains: $chainCount, Points: $pointCount, Avg per chain: ${
-                        pointCount / chainCount.coerceAtLeast(1)
-                    }"
-                )
-
-
-                // ADD BACK pathStorage.finalizeSession()
-                saveChainsNow()
-                sharedMapView?.layerManager?.redrawLayers()
-                isReplayingRoute = false
-            }
-        }
-    }*/
 
 
     init {

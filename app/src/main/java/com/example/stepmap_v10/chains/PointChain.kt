@@ -66,51 +66,14 @@ private data class PathHypothesis(
     var score: Double = 0.0,
     var missCount: Int = 0,
     var pointCount: Int = 0,
-    val segmentHistory: ArrayDeque<Pair<Segment, Int>> = ArrayDeque()
+    val segmentHistory: ArrayDeque<Pair<Segment, Int>> = ArrayDeque(),
+    var pendingSegment: Segment? = null,
+    var pendingCount: Int = 0
 )
 
-//TODO: REMOVE
-class RawGpsPointsLayer(
-    private val context: Context,
-    private val fileName: String
-) : Layer() {
+// need 2 consecutive points on same segment to commit
+private val COMMIT_THRESHOLD = 2
 
-    private val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-        setColor(android.graphics.Color.GREEN)
-        setStrokeWidth(1f)
-    }
-
-    private var rawPoints: List<Pair<Double, Double>> = emptyList()
-
-    fun loadPoints() {
-        val json = Json { ignoreUnknownKeys = true }
-        val text = File(context.filesDir, fileName).readText()
-        val route = json.decodeFromString<RecordedRoute>(text)
-        rawPoints = route.points.map { Pair(it.lat, it.lon) }
-    }
-
-    override fun draw(
-        boundingBox: BoundingBox,
-        zoomLevel: Byte,
-        canvas: Canvas,
-        topLeftPoint: Point,
-        rotation: Rotation
-    ) {
-        val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
-
-        for ((lat, lon) in rawPoints) {
-            val pixelX = MercatorProjection.longitudeToPixelX(lon, mapSize)
-            val pixelY = MercatorProjection.latitudeToPixelY(lat, mapSize)
-            val screenX = (pixelX - topLeftPoint.x).toInt()
-            val screenY = (pixelY - topLeftPoint.y).toInt()
-
-            if (screenX < -10 || screenX > canvas.width + 10 ||
-                screenY < -10 || screenY > canvas.height + 10) continue
-
-            canvas.drawCircle(screenX, screenY, 4, paint)
-        }
-    }
-}
 class DebugPointsLayer(private val pathStorage: PathStorage) : Layer() {
 
     private val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
@@ -398,7 +361,6 @@ class PathStorage {
             return
         }
 
-        // BFS with parent map so we can trace intermediate segments
         val parentMap = getReachableSegmentsWithPath(currentPrimary.lastSegment, index)
 
         val bestForPrimary: Segment? = parentMap.keys
@@ -416,37 +378,60 @@ class PathStorage {
             currentPrimary.timestamp = now
 
             if (bestForPrimary !== currentPrimary.lastSegment) {
-                val historyEntry = currentPrimary.segmentHistory
-                    .findLast { it.first === bestForPrimary }
+                // ── Pending commit logic ──
+                if (bestForPrimary === currentPrimary.pendingSegment) {
+                    // Same candidate confirmed again
+                    currentPrimary.pendingCount++
 
-                if (historyEntry != null) {
-                    // Revisiting a past segment — trim the wrong detour
-                    val targetLength = historyEntry.second
-                    while (currentPrimary.chain.points.size > targetLength) {
-                        currentPrimary.chain.points.removeLast()
+                    if (currentPrimary.pendingCount >= COMMIT_THRESHOLD) {
+                        // Enough confirmation — commit the segment
+                        val historyEntry = currentPrimary.segmentHistory
+                            .findLast { it.first === bestForPrimary }
+
+                        if (historyEntry != null) {
+                            // Revisiting a past segment — trim the wrong detour
+                            val targetLength = historyEntry.second
+                            while (currentPrimary.chain.points.size > targetLength) {
+                                currentPrimary.chain.points.removeLast()
+                            }
+                            while (currentPrimary.segmentHistory.isNotEmpty() &&
+                                currentPrimary.segmentHistory.last().second > targetLength) {
+                                currentPrimary.segmentHistory.removeLast()
+                            }
+                        } else {
+                            // New segment — trace all intermediate road nodes
+                            extendChainWithPath(
+                                currentPrimary.chain, parentMap,
+                                bestForPrimary!!, currentPrimary.chain.points.last()
+                            )
+                            currentPrimary.segmentHistory.addLast(
+                                Pair(bestForPrimary, currentPrimary.chain.points.size)
+                            )
+                            if (currentPrimary.segmentHistory.size > 50) {
+                                currentPrimary.segmentHistory.removeFirst()
+                            }
+                        }
+
+                        currentPrimary.lastSegment = bestForPrimary!!
+                        currentPrimary.chain.dirty = true
+                        currentPrimary.pendingSegment = null
+                        currentPrimary.pendingCount = 0
                     }
-                    while (currentPrimary.segmentHistory.isNotEmpty() &&
-                        currentPrimary.segmentHistory.last().second > targetLength) {
-                        currentPrimary.segmentHistory.removeLast()
-                    }
+                    // else: still accumulating confirmation, don't commit yet
+
                 } else {
-                    // New segment — trace ALL intermediate road nodes, no straight lines
-                    extendChainWithPath(
-                        currentPrimary.chain, parentMap,
-                        bestForPrimary!!, currentPrimary.chain.points.last()
-                    )
-                    currentPrimary.segmentHistory.addLast(
-                        Pair(bestForPrimary, currentPrimary.chain.points.size)
-                    )
-                    if (currentPrimary.segmentHistory.size > 50) {
-                        currentPrimary.segmentHistory.removeFirst()
-                    }
+                    // Different candidate — reset pending, start fresh count
+                    currentPrimary.pendingSegment = bestForPrimary
+                    currentPrimary.pendingCount = 1
                 }
-                currentPrimary.lastSegment = bestForPrimary!!
-                currentPrimary.chain.dirty = true
+
+            } else {
+                // Still on same segment — clear any pending candidate
+                currentPrimary.pendingSegment = null
+                currentPrimary.pendingCount = 0
             }
 
-            // Spawn backups at direct junctions (single hop — no path needed)
+            // Spawn backups at direct junctions
             if (bkps.size < MAX_BACKUPS) {
                 val directConnected = index.connectedSegments(currentPrimary.lastSegment).toSet()
                 val alternatives = directConnected
@@ -466,15 +451,14 @@ class PathStorage {
                         dirty = true
                     )
                     extendChain(backupChain, alt, backupChain.points.last())
-                    val bHyp = PathHypothesis(
+                    bkps.add(PathHypothesis(
                         id = nextHypId++,
                         chain = backupChain,
                         lastSegment = alt,
                         timestamp = now,
                         score = currentPrimary.score,
                         pointCount = currentPrimary.pointCount
-                    )
-                    bkps.add(bHyp)
+                    ))
                 }
             }
 
@@ -485,9 +469,12 @@ class PathStorage {
             }
 
         } else {
+            // ── Primary missed ──
             currentPrimary.missCount++
+            currentPrimary.pendingSegment = null
+            currentPrimary.pendingCount = 0
 
-            // Hard reset — GPS moved far away permanently
+            // Hard reset — GPS has genuinely moved far away
             if (currentPrimary.missCount >= HARD_RESET_THRESHOLD) {
                 removePrimary(movementType)
                 bkps.clear()
@@ -495,7 +482,7 @@ class PathStorage {
                 return
             }
 
-            // Advance backups using path tracing
+            // Advance backups
             for (backup in bkps) {
                 val bParentMap = getReachableSegmentsWithPath(backup.lastSegment, index)
                 val bestForBackup: Segment? = bParentMap.keys
@@ -533,6 +520,7 @@ class PathStorage {
                     primary[movementType] = bestBackup
                     bestBackup.missCount = 0
                 }
+                // else: wait for hard reset
             }
         }
 
