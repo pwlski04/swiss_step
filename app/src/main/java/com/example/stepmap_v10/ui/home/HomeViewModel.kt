@@ -71,6 +71,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
+            withContext(Dispatchers.Default) {
+                pathStorage.finalizeSession()
+            }
             withContext(Dispatchers.Main) {
                 sharedMapView?.layerManager?.redrawLayers()
                 isReplayingRoute = false
