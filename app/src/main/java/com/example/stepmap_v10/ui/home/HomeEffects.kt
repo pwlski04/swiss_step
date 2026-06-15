@@ -14,7 +14,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
-import com.example.stepmap_v10.chains.DebugPointsLayer
+import com.example.stepmap_v10.chains.LocationPointsLayer
 import com.example.stepmap_v10.chains.PathOverlayLayer
 import com.example.stepmap_v10.map.applySmoothMapForceField
 import com.example.stepmap_v10.paths.PathPoint
@@ -59,9 +59,13 @@ fun HomeEffects(
             mv.layerManager.layers.add(pathOverlayLayer)
         }
         // Debug layer — add on top
-        val debugLayer = DebugPointsLayer(viewModel.pathStorage)
-        viewModel.debugLayer = debugLayer
+        val debugLayer = LocationPointsLayer(viewModel.pathStorage)
+        viewModel.locationPointsLayer = debugLayer
         mv.layerManager.layers.add(debugLayer)
+
+        // Pre-project
+        viewModel.preProjectAllZoomLevels()
+        mv.layerManager.redrawLayers()
     }
 
     /* START TRACKING WHEN LOCATION PERMISSION IS GRANTED */

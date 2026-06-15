@@ -52,7 +52,7 @@ fun RememberHomeState(context: Context, viewModel: HomeViewModel): HomeState{
 
     val state = remember {
         HomeState(
-            lifecycleOwner, permissionLauncher, viewModel.pathStorage, viewModel.pathOverlayLayer, loadIsDrawing(context)
+            lifecycleOwner, permissionLauncher, viewModel.pathStorage, viewModel.pathOverlayLayer, TrackingLiveState.isDrawing.value
         )
     }
 

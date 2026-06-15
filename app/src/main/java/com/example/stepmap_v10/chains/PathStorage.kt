@@ -2,173 +2,15 @@ package com.example.stepmap_v10.chains
 
 import com.example.stepmap_v10.paths.Segment
 import com.example.stepmap_v10.paths.SegmentIndex
-import com.example.stepmap_v10.paths.colorForMovementType
 import com.example.stepmap_v10.paths.pointToSegmentDistance
-import com.example.stepmap_v10.paths.strokeWidthComputer
 import com.example.stepmap_v10.tracking.MovementType
-import org.mapsforge.core.graphics.Canvas
-import org.mapsforge.core.graphics.Paint
-import org.mapsforge.core.model.BoundingBox
 import org.mapsforge.core.model.LatLong
-import org.mapsforge.core.model.Point
-import org.mapsforge.core.model.Rotation
-import org.mapsforge.core.util.MercatorProjection
-import org.mapsforge.map.android.graphics.AndroidGraphicFactory
-import org.mapsforge.map.layer.Layer
-import kotlinx.serialization.Serializable
 import android.content.Context
 import android.util.Log
 import com.example.stepmap_v10.tracking.AppSegmentIndex
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
-
-
-/* DATA CLASSES */
-
-data class PathChain(
-    val id: Long,
-    val movementType: MovementType,
-    val points: ArrayDeque<LatLong>,
-    var dirty: Boolean = true
-)
-
-@Serializable
-data class StoredChainCollection(val entries: List<StoredMovementEntry>)
-
-@Serializable
-data class StoredMovementEntry(val movementType: MovementType, val chains: List<StoredPathChain>)
-
-@Serializable
-data class StoredPathChain(val id: Long, val movementType: MovementType, val points: List<StoredPoint>)
-
-@Serializable
-data class StoredPoint(val lat: Double, val lon: Double)
-
-
-private data class PathHypothesis(
-    val id: Long,
-    val chain: PathChain,
-    var lastSegment: Segment,
-    var timestamp: Long,
-    var score: Double = 0.0,
-    var missCount: Int = 0,
-    var pointCount: Int = 0,
-    val segmentHistory: ArrayDeque<Pair<Segment, Int>> = ArrayDeque(),
-    var pendingSegment: Segment? = null,
-    var pendingCount: Int = 0
-)
-
-private val COMMIT_THRESHOLD = 2
-
-
-/* DEBUG LAYER */
-
-class DebugPointsLayer(private val pathStorage: PathStorage) : Layer() {
-    private val paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-        setColor(android.graphics.Color.RED)
-        setStrokeWidth(0f)
-    }
-
-    override fun draw(boundingBox: BoundingBox, zoomLevel: Byte, canvas: Canvas, topLeftPoint: Point, rotation: Rotation) {
-        val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
-        val allPoints = synchronized(pathStorage) {
-            pathStorage.chains.values.flatten()
-                .flatMap { chain -> synchronized(chain) { chain.points.toList() } }
-        }
-        for (point in allPoints) {
-            val pixelX = MercatorProjection.longitudeToPixelX(point.longitude, mapSize)
-            val pixelY = MercatorProjection.latitudeToPixelY(point.latitude, mapSize)
-            val screenX = (pixelX - topLeftPoint.x).toInt()
-            val screenY = (pixelY - topLeftPoint.y).toInt()
-            if (screenX < -10 || screenX > canvas.width + 10 ||
-                screenY < -10 || screenY > canvas.height + 10) continue
-            canvas.drawCircle(screenX, screenY, 6, paint)
-        }
-    }
-}
-
-
-/* OVERLAY LAYER */
-
-class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
-    private val paintCache = HashMap<Pair<MovementType, Byte>, Paint>()
-    private val projectionCache = ConcurrentHashMap<Long, HashMap<Byte, List<Pair<Double, Double>>>>()
-
-    override fun draw(boundingBox: BoundingBox, zoomLevel: Byte, canvas: Canvas, topLeftPoint: Point, rotation: Rotation) {
-        val w = canvas.width.toDouble()
-        val h = canvas.height.toDouble()
-
-        for (movementType in DRAW_ORDER) {
-            val chains = synchronized(pathStorage) {
-                pathStorage.chains[movementType]?.toList()
-            } ?: continue
-            if (chains.isEmpty()) continue
-            val paint = getPaint(movementType, zoomLevel)
-
-            for (chain in chains) {
-                val zoomCache = projectionCache.getOrPut(chain.id) { HashMap() }
-                if (chain.dirty || !zoomCache.containsKey(zoomLevel)) {
-                    zoomCache.clear()
-                    zoomCache[zoomLevel] = projectChain(chain, zoomLevel)
-                    chain.dirty = false
-                }
-                drawProjectedChain(zoomCache[zoomLevel]!!, topLeftPoint, canvas, paint, w, h)
-            }
-        }
-    }
-
-    private fun drawProjectedChain(mapPoints: List<Pair<Double, Double>>, topLeftPoint: Point, canvas: Canvas, paint: Paint, w: Double, h: Double) {
-        for (i in 0 until mapPoints.size - 1) {
-            val (ax, ay) = mapPoints[i]
-            val (bx, by) = mapPoints[i + 1]
-            val x1 = ax - topLeftPoint.x
-            val y1 = ay - topLeftPoint.y
-            val x2 = bx - topLeftPoint.x
-            val y2 = by - topLeftPoint.y
-            if (!segmentIntersectsViewport(x1, y1, x2, y2, w, h)) continue
-            canvas.drawLine(x1.toInt(), y1.toInt(), x2.toInt(), y2.toInt(), paint)
-        }
-    }
-
-    fun evictFromCache(chainId: Long) { projectionCache.remove(chainId) }
-
-    companion object {
-        val DRAW_ORDER = listOf(
-            MovementType.STILL,
-            MovementType.TRANSPORT,
-            MovementType.BIKING,
-            MovementType.RUNNING,
-            MovementType.WALKING,
-        )
-    }
-
-    fun getPaint(movementType: MovementType, zoomLevel: Byte): Paint {
-        return paintCache.getOrPut(Pair(movementType, zoomLevel)) {
-            AndroidGraphicFactory.INSTANCE.createPaint().apply {
-                color = colorForMovementType(movementType)
-                strokeWidth = strokeWidthComputer(zoomLevel.toFloat())
-            }
-        }
-    }
-
-    private fun projectChain(chain: PathChain, zoomLevel: Byte): List<Pair<Double, Double>> {
-        val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
-        val points = synchronized(chain) { chain.points.toList() }
-        return points.map { latLong ->
-            Pair(
-                MercatorProjection.longitudeToPixelX(latLong.longitude, mapSize),
-                MercatorProjection.latitudeToPixelY(latLong.latitude, mapSize)
-            )
-        }
-    }
-
-    private fun segmentIntersectsViewport(x1: Double, y1: Double, x2: Double, y2: Double, width: Double, height: Double): Boolean {
-        return maxOf(x1, x2) >= 0 && minOf(x1, x2) <= width &&
-                maxOf(y1, y2) >= 0 && minOf(y1, y2) <= height
-    }
-}
 
 
 /* PATH STORAGE */
@@ -192,6 +34,8 @@ class PathStorage {
     private val HARD_RESET_THRESHOLD    = 30
     private val BFS_SEARCH_DISTANCE     = 0.005
 
+    private val COMMIT_THRESHOLD = 2
+
     var onChainRemoved: ((Long) -> Unit)? = null
     var onChainsChanged: (() -> Unit)? = null
     var lastActiveMovementType: MovementType = MovementType.TRANSPORT
@@ -209,7 +53,7 @@ class PathStorage {
             ?: return
 
         val distToStart = gpsPoint.distanceTo(nearest.startingPoint)
-        val distToEnd   = gpsPoint.distanceTo(nearest.endingPoint)
+        val distToEnd = gpsPoint.distanceTo(nearest.endingPoint)
         val (first, second) = if (distToStart <= distToEnd)
             Pair(nearest.startingPoint, nearest.endingPoint)
         else
@@ -223,7 +67,6 @@ class PathStorage {
         )
         chains[movementType]?.add(chain)
         val hyp = PathHypothesis(id = nextHypId++, chain = chain, lastSegment = nearest, timestamp = now)
-        hyp.segmentHistory.addLast(Pair(nearest, chain.points.size))
         primary[movementType] = hyp
         modifiedMovementTypes.add(movementType)
         onChainsChanged?.invoke()
@@ -328,20 +171,11 @@ class PathStorage {
                 if (bestForPrimary === currentPrimary.pendingSegment) {
                     currentPrimary.pendingCount++
                     if (currentPrimary.pendingCount >= COMMIT_THRESHOLD) {
-                        val historyEntry = currentPrimary.segmentHistory
-                            .findLast { it.first === bestForPrimary }
-                        if (historyEntry != null) {
-                            val targetLength = historyEntry.second
-                            while (currentPrimary.chain.points.size > targetLength)
-                                currentPrimary.chain.points.removeLast()
-                            while (currentPrimary.segmentHistory.isNotEmpty() &&
-                                currentPrimary.segmentHistory.last().second > targetLength)
-                                currentPrimary.segmentHistory.removeLast()
-                        } else {
-                            extendChainWithPath(currentPrimary.chain, parentMap, bestForPrimary!!, currentPrimary.chain.points.last())
-                            currentPrimary.segmentHistory.addLast(Pair(bestForPrimary, currentPrimary.chain.points.size))
-                            if (currentPrimary.segmentHistory.size > 50) currentPrimary.segmentHistory.removeFirst()
-                        }
+                        // Commit — just extend, no history trimming
+                        extendChainWithPath(
+                            currentPrimary.chain, parentMap,
+                            bestForPrimary!!, currentPrimary.chain.points.last()
+                        )
                         currentPrimary.lastSegment = bestForPrimary!!
                         currentPrimary.chain.dirty = true
                         currentPrimary.pendingSegment = null
@@ -491,13 +325,75 @@ class PathStorage {
 
     @Synchronized
     fun finalizeSession() {
-        Log.d("BRIDGE", "finalizeSession START")
         val index = AppSegmentIndex.instance
-        Log.d("BRIDGE", "finalizeSession index=$index chains=${chains.values.sumOf { it.size }}")
         bridgeMovementTypeGaps(index)
         primary.clear()
         backups.clear()
         modifiedMovementTypes.clear()
+    }
+
+    fun mergeChainsByType() {
+        for (movementType in MovementType.entries) {
+            val chainList = chains[movementType] ?: continue
+            if (chainList.size <= 1) continue
+
+            val threshold = 0.00005
+            fun quantize(v: Double) = (v / threshold).toLong()
+            fun LatLong.key() = Pair(quantize(latitude), quantize(longitude))
+
+            data class Slot(val chain: PathChain, val isHead: Boolean)
+
+            fun buildIndex(): HashMap<Pair<Long, Long>, Slot> {
+                val idx = HashMap<Pair<Long, Long>, Slot>()
+                for (chain in chainList) {
+                    if (chain.points.isEmpty()) continue
+                    idx[chain.points.first().key()] = Slot(chain, true)
+                    idx[chain.points.last().key()]  = Slot(chain, false)
+                }
+                return idx
+            }
+
+            fun lookup(idx: HashMap<Pair<Long, Long>, Slot>, key: Pair<Long, Long>, exclude: PathChain): Slot? {
+                for (dx in -1..1) for (dy in -1..1) {
+                    val s = idx[Pair(key.first + dx, key.second + dy)]
+                    if (s != null && s.chain !== exclude) return s
+                }
+                return null
+            }
+
+            var merged = true
+            while (merged) {
+                merged = false
+                val idx = buildIndex()
+
+                for (chain in chainList.toList()) {
+                    if (!chainList.contains(chain)) continue
+
+                    val tailSlot = lookup(idx, chain.points.last().key(), chain)
+                    if (tailSlot != null) {
+                        val b = tailSlot.chain
+                        if (tailSlot.isHead) b.points.forEach { chain.points.addLast(it) }
+                        else b.points.reversed().forEach { chain.points.addLast(it) }
+                        chainList.remove(b)
+                        onChainRemoved?.invoke(b.id)
+                        chain.dirty = true
+                        merged = true; break
+                    }
+
+                    val headSlot = lookup(idx, chain.points.first().key(), chain)
+                    if (headSlot != null) {
+                        val b = headSlot.chain
+                        if (!headSlot.isHead) b.points.forEach { chain.points.addFirst(it) }
+                        else b.points.reversed().forEach { chain.points.addFirst(it) }
+                        chainList.remove(b)
+                        onChainRemoved?.invoke(b.id)
+                        chain.dirty = true
+                        merged = true; break
+                    }
+                }
+            }
+        }
+        onChainsChanged?.invoke()
     }
 
     private fun bridgeMovementTypeGaps(index: SegmentIndex?) {

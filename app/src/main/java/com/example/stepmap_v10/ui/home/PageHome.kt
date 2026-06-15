@@ -6,6 +6,7 @@ import android.view.MotionEvent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -13,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import org.mapsforge.map.android.view.MapView
 
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -67,7 +69,6 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             isDrawing = isDrawing,
             latestLivePoint = latestLivePoint,
             liveMovementType = liveMovementType,
-            //locationMarker = viewModel.locationMarker,
 
             permissionLauncher = permissionLauncher,
             hasLocationPermission = hasLocationPermission,
@@ -181,51 +182,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 )
                             }
                         } else { // Replay button — show when not drawing and delete when long pressing:
-                            val routes = remember { viewModel.routeRecorder.listSavedRoutes(context).toMutableStateList() }
-
-                            routes.forEach { fileName ->
-                                val scope = rememberCoroutineScope()
-                                var holdJob by remember { mutableStateOf<Job?>(null) }
-
-                                Surface(
-                                    shape = RoundedCornerShape(18.dp),
-                                    tonalElevation = 6.dp,
-                                    shadowElevation = 8.dp,
-                                    modifier = Modifier.padding(4.dp)
-                                ) {
-                                    Text(
-                                        text = fileName.removePrefix("route_").removeSuffix(".json"),
-                                        modifier = Modifier
-                                            .padding(14.dp)
-                                            .pointerInput(fileName) {
-                                                awaitPointerEventScope {
-                                                    while (true) {
-                                                        awaitFirstDown(requireUnconsumed = false)
-                                                        holdJob = scope.launch {
-                                                            delay(3000L)
-                                                            File(context.filesDir, fileName).delete()
-                                                            routes.remove(fileName)
-                                                        }
-                                                        do {
-                                                            val event = awaitPointerEvent(
-                                                                PointerEventPass.Final)
-                                                            if (event.changes.all { !it.pressed }) {
-                                                                holdJob?.cancel()
-                                                                holdJob = null
-                                                                break
-                                                            }
-                                                        } while (true)
-                                                    }
-                                                }
-                                            }
-                                            .clickable {
-                                                viewModel.replayRoute(context, fileName)
-                                            }
-                                    )
-                                }
-                            }
-
-                            if(viewModel.hasChains) {
+                            if(viewModel.hasChainsToDisplay) {
                                 Surface(
                                     //BUTTON: REMOVE HISTORY
                                     onClick = {
@@ -245,6 +202,52 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                         modifier = Modifier.padding(14.dp)
                                     )
                                 }
+                            }
+                        }
+                    }
+
+                    Column(modifier = Modifier.align(Alignment.CenterStart).heightIn(max = 250.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp, horizontal = 4.dp)){
+                        val routes = remember { viewModel.routeRecorder.listSavedRoutes(context).toMutableStateList() }
+
+                        routes.forEach { fileName ->
+                            val scope = rememberCoroutineScope()
+                            var holdJob by remember { mutableStateOf<Job?>(null) }
+
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                tonalElevation = 6.dp,
+                                shadowElevation = 8.dp,
+                                modifier = Modifier.padding(4.dp)
+                            ) {
+                                Text(
+                                    text = fileName.removePrefix("route_").removeSuffix(".json"),
+                                    modifier = Modifier
+                                        .padding(14.dp)
+                                        .pointerInput(fileName) {
+                                            awaitPointerEventScope {
+                                                while (true) {
+                                                    awaitFirstDown(requireUnconsumed = false)
+                                                    holdJob = scope.launch {
+                                                        delay(3000L)
+                                                        File(context.filesDir, fileName).delete()
+                                                        routes.remove(fileName)
+                                                    }
+                                                    do {
+                                                        val event = awaitPointerEvent(
+                                                            PointerEventPass.Final)
+                                                        if (event.changes.all { !it.pressed }) {
+                                                            holdJob?.cancel()
+                                                            holdJob = null
+                                                            break
+                                                        }
+                                                    } while (true)
+                                                }
+                                            }
+                                        }
+                                        .clickable {
+                                            viewModel.replayRoute(context, fileName)
+                                        }
+                                )
                             }
                         }
                     }

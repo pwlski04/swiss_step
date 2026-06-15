@@ -46,18 +46,13 @@ object AppSegmentIndex {
 }
 
 
-
 class LocationTrackingService: Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var sessionId: Long = 0L
     private val movementClassifier = MovementClassifier()
 
-    /* NEW */
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
-
-    private var backgroundPointCount = 0
-
 
     /* Notification */
     private fun showForegroundNotification() {
@@ -97,6 +92,8 @@ class LocationTrackingService: Service() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
+
+        isRunning = true
     }
 
 
@@ -134,15 +131,15 @@ class LocationTrackingService: Service() {
     }
 
     override fun onDestroy() {
-        Log.d("StepByStep_v1.0_TAG", "LocationTrackingService destroyed")
         stopLocationUpdates()
         serviceJob.cancel()
         super.onDestroy()
+
+        isRunning = false
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        Log.d("StepByStep_v1.0_TAG", "Task removed — saving chains")
         serviceScope.launch(Dispatchers.IO) {
             AppPathStorage.instance?.save(applicationContext)
         }
@@ -228,19 +225,6 @@ class LocationTrackingService: Service() {
                 }
                 storage.onGpsPoint(LatLong(location.latitude, location.longitude), effectiveType, index)
             }
-            /*if (dist < 0.0003 && movementType != MovementType.STILL) {
-                Log.d("StepByStep_v1.0_TAG", "Segment found")
-                storage.onGpsPoint(nearest, movementType, index)
-
-                backgroundPointCount++
-                if (backgroundPointCount % 10 == 0) {
-                    serviceScope.launch(Dispatchers.IO) {
-                        storage.save(applicationContext)
-                    }
-                }
-            } else {
-                Log.d("StepByStep_v1.0_TAG", "Segment NOT found")
-            }*/
         }
 
         Log.d("StepByStep_v1.0_TAG",
@@ -331,6 +315,8 @@ class LocationTrackingService: Service() {
 
         private const val ACTION_FOREGROUND_UPDATES = "foreground_updates"
         private const val ACTION_BACKGROUND_UPDATES = "background_updates"
+
+        var isRunning = false
 
         fun start(context: Context, sessionId: Long) {
             val intent = Intent(context, LocationTrackingService::class.java)
