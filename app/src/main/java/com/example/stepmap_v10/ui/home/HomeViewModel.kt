@@ -40,6 +40,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
     }
     var locationPointsLayer: LocationPointsLayer? = null
+    var showLocationPoints by mutableStateOf(false)
+    var showPathColorChoice by mutableStateOf(false)
 
     var allPaths by mutableStateOf<List<Path>>(emptyList())
     var mapFilePath by mutableStateOf<String?>(null)

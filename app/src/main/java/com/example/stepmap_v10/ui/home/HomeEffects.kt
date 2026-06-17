@@ -43,6 +43,7 @@ fun HomeEffects(
     latestLivePoint: PathPoint?,
     liveMovementType: MovementType,
     //locationMarker: LocationMarker,
+    showLocationPoints: Boolean = viewModel.showLocationPoints,
 
     permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
     hasLocationPermission: Boolean,
@@ -58,13 +59,27 @@ fun HomeEffects(
         if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
             mv.layerManager.layers.add(pathOverlayLayer)
         }
-        // Debug layer — add on top
-        val debugLayer = LocationPointsLayer(viewModel.pathStorage)
-        viewModel.locationPointsLayer = debugLayer
-        mv.layerManager.layers.add(debugLayer)
 
         // Pre-project
         viewModel.preProjectAllZoomLevels()
+        mv.layerManager.redrawLayers()
+    }
+
+    LaunchedEffect(mapView, showLocationPoints) {
+        val mv = mapView ?: return@LaunchedEffect
+
+        if (showLocationPoints) {
+            if (viewModel.locationPointsLayer == null) {
+                val debugLayer = LocationPointsLayer(viewModel.pathStorage)
+                viewModel.locationPointsLayer = debugLayer
+                mv.layerManager.layers.add(debugLayer)
+            }
+        } else {
+            viewModel.locationPointsLayer?.let { layer ->
+                mv.layerManager.layers.remove(layer)
+                viewModel.locationPointsLayer = null
+            }
+        }
         mv.layerManager.redrawLayers()
     }
 

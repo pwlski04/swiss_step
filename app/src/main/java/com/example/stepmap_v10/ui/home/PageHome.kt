@@ -172,7 +172,10 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                         viewModel.routeRecorder.startRecording()
                                     }
                                 },
-                                shape = RoundedCornerShape(18.dp)
+                                shape = RoundedCornerShape(18.dp),
+                                tonalElevation = 6.dp,
+                                shadowElevation = 8.dp,
+                                modifier = Modifier.padding(top = 12.dp, end = 12.dp)
                             ) {
                                 Icon(
                                     imageVector = if (viewModel.routeRecorder.isRecording)
@@ -193,8 +196,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                     shape = RoundedCornerShape(18.dp),
                                     tonalElevation = 6.dp,
                                     shadowElevation = 8.dp,
-                                    modifier = Modifier
-                                        .padding(top = 12.dp, end = 12.dp)
+                                    modifier = Modifier.padding(top = 12.dp, end = 12.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.DeleteOutline,
