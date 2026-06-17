@@ -26,6 +26,7 @@ import com.example.stepmap_v10.chains.AppRouteRecorder
 import com.example.stepmap_v10.chains.LocationPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
 import com.example.stepmap_v10.tracking.LocationTrackingService
+import com.example.stepmap_v10.tracking.MovementType
 import kotlinx.coroutines.runBlocking
 import org.mapsforge.core.model.LatLong
 
@@ -172,12 +173,69 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun replayRoute(context: Context, fileName: String) {
+        isReplayingRoute = true
+        viewModelScope.launch(Dispatchers.Default) {
+            pathStorage.clearSegments()
+            var lastLat: Double? = null
+            var lastLon: Double? = null
+            var lastTimestamp: Long? = null
+            var lastMovementType: MovementType? = null
+            var lastBearing: Double? = null
+
+            routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
+                val pLat = lastLat; val pLon = lastLon; val pTime = lastTimestamp
+
+                var shouldSkip = false
+                if (pLat != null && pLon != null && pTime != null) {
+                    val dLat = lat - pLat; val dLon = lon - pLon
+                    val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
+                    val timeDiff = timestamp - pTime
+
+                    // Never skip if movement type changed — transitions matter
+                    val typeChanged = movementType != lastMovementType
+
+                    // Never skip if direction changed meaningfully — turns matter
+                    val bearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
+                    val bearingChanged = lastBearing != null &&
+                            Math.abs(((bearing - lastBearing!! + 540) % 360) - 180) > 25.0
+
+                    shouldSkip = distMeters < 4.0 && timeDiff < 4000 &&
+                            !typeChanged && !bearingChanged
+                }
+
+                if (shouldSkip) return@loadAndReplay
+
+                // Update bearing only when we actually moved a meaningful amount
+                if (pLat != null && pLon != null) {
+                    val dLat = lat - pLat; val dLon = lon - pLon
+                    val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
+                    if (distMeters > 2.0) {
+                        lastBearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
+                    }
+                }
+
+                lastLat = lat; lastLon = lon; lastTimestamp = timestamp
+                lastMovementType = movementType
+
+                val index = AppSegmentIndex.instance ?: return@loadAndReplay
+                pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
+            }
+
+            pathStorage.finalizeSession()
+            pathStorage.mergeChainsByType()
+            preProjectAllZoomLevels()
+            withContext(Dispatchers.Main) {
+                sharedMapView?.layerManager?.redrawLayers()
+                isReplayingRoute = false
+            }
+            saveChainsNow()
+        }
         /*
         If the user selects a specific path, this function loads and displays previously saved
         walked paths. Is not called for the current path.
         TODO: when current path is not saved ask whether user wants it saved before displaying, or
          make display temporary with current path as default
-         */
+
         isReplayingRoute = true
         viewModelScope.launch(Dispatchers.Default) {
             pathStorage.clearSegments()
@@ -196,7 +254,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             saveChainsNow()
-        }
+        }*/
     }
 
     override fun onCleared() {

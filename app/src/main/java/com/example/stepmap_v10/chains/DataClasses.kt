@@ -38,4 +38,7 @@ data class PathHypothesis(
     var pointCount: Int = 0,
     var pendingSegment: Segment? = null,
     var pendingCount: Int = 0,
+
+    var cachedReachable: Map<Segment, Segment?>? = null,
+    var cachedForSegment: Segment? = null
 )

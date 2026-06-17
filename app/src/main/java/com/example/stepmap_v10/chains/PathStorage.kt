@@ -22,17 +22,17 @@ class PathStorage {
 
     val modifiedMovementTypes = mutableSetOf<MovementType>()
     private var nextChainId = 0L
-    private var nextHypId   = 0L
+    private var nextHypId = 0L
 
     private val primary = HashMap<MovementType, PathHypothesis>()
     private val backups = HashMap<MovementType, MutableList<PathHypothesis>>()
 
-    private val LIVE_GAP_THRESHOLD_MS   = 30_000L
+    private val LIVE_GAP_THRESHOLD_MS = 30_000L
     private val MAX_CONTINUITY_DISTANCE = 0.0008
-    private val MISS_THRESHOLD          = 5
-    private val MAX_BACKUPS             = 3
-    private val HARD_RESET_THRESHOLD    = 30
-    private val BFS_SEARCH_DISTANCE     = 0.005
+    private val MISS_THRESHOLD = 5
+    private val MAX_BACKUPS = 3
+    private val HARD_RESET_THRESHOLD = 30
+    private val BFS_SEARCH_DISTANCE = 0.005
 
     private val COMMIT_THRESHOLD = 2
 
@@ -151,7 +151,7 @@ class PathStorage {
             return
         }
 
-        val parentMap = getReachableSegmentsWithPath(currentPrimary.lastSegment, index)
+        val parentMap = getReachableCached(currentPrimary, index)
 
         val bestForPrimary: Segment? = parentMap.keys
             .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
@@ -215,7 +215,7 @@ class PathStorage {
             }
 
             bkps.removeAll { backup ->
-                getReachableSegmentsWithPath(backup.lastSegment, index).keys
+                getReachableCached(backup, index).keys
                     .none { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE * 2.0 }
             }
 
@@ -225,14 +225,16 @@ class PathStorage {
             currentPrimary.pendingCount = 0
 
             if (currentPrimary.missCount >= HARD_RESET_THRESHOLD) {
-                removePrimary(movementType)
+                primary.remove(movementType)
+
                 bkps.clear()
                 spawnFreshPrimary(gpsPoint, movementType, index, now)
                 return
             }
 
             for (backup in bkps) {
-                val bParentMap = getReachableSegmentsWithPath(backup.lastSegment, index)
+                val bParentMap = getReachableCached(backup, index)
+
                 val bestForBackup: Segment? = bParentMap.keys
                     .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
                     .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
@@ -286,6 +288,16 @@ class PathStorage {
             }
         }
         return parentMap
+    }
+
+    private fun getReachableCached(hyp: PathHypothesis, index: SegmentIndex): Map<Segment, Segment?> {
+        if (hyp.cachedForSegment === hyp.lastSegment && hyp.cachedReachable != null) {
+            return hyp.cachedReachable!!
+        }
+        val result = getReachableSegmentsWithPath(hyp.lastSegment, index)
+        hyp.cachedReachable = result
+        hyp.cachedForSegment = hyp.lastSegment
+        return result
     }
 
     private fun removePrimary(movementType: MovementType) {

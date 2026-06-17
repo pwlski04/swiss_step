@@ -24,9 +24,11 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
@@ -53,6 +55,8 @@ TODO:
 @Composable
 fun Page_Home(context: Context, viewModel: HomeViewModel) {
     val state = RememberHomeState(context, viewModel)
+
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     with(state) { // To not have to write state.xyz everywhere
         HomeEffects(
@@ -189,9 +193,12 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 Surface(
                                     //BUTTON: REMOVE HISTORY
                                     onClick = {
+                                        /*
                                         state.pathStorage.clearSegments()
                                         viewModel.sharedMapView?.layerManager?.redrawLayers()
                                         viewModel.deleteSavedChains()
+                                        */
+                                        showDeleteDialog = true
                                     },
                                     shape = RoundedCornerShape(18.dp),
                                     tonalElevation = 6.dp,
@@ -359,4 +366,47 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             }
         }
     }
+
+    if (showDeleteDialog) {
+        DeleteHistoryDialog(
+            onSaveAndDelete = {
+                viewModel.routeRecorder.stopAndSave(context)
+                state.pathStorage.clearSegments()
+                viewModel.sharedMapView?.layerManager?.redrawLayers()
+                viewModel.deleteSavedChains()
+                showDeleteDialog = false
+            },
+            onDeleteOnly = {
+                state.pathStorage.clearSegments()
+                viewModel.sharedMapView?.layerManager?.redrawLayers()
+                viewModel.deleteSavedChains()
+                showDeleteDialog = false
+            },
+            onCancel = { showDeleteDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun DeleteHistoryDialog(
+    onSaveAndDelete: () -> Unit,
+    onDeleteOnly: () -> Unit,
+    onCancel: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Delete history") },
+        text = { Text("Do you want to save this route before deleting it?") },
+        confirmButton = {
+            TextButton(onClick = onSaveAndDelete) {
+                Text("Save and delete")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDeleteOnly) { Text("Delete") }
+                TextButton(onClick = onCancel) { Text("Cancel") }
+            }
+        }
+    )
 }
