@@ -25,6 +25,7 @@ import com.example.stepmap_v10.tracking.TrackingLiveState
 import kotlinx.coroutines.delay
 import org.mapsforge.map.android.view.MapView
 import com.example.stepmap_v10.chains.PathStorage
+import com.example.stepmap_v10.chains.RawGpsPointsLayer
 
 
 @Composable
@@ -69,15 +70,24 @@ fun HomeEffects(
         val mv = mapView ?: return@LaunchedEffect
 
         if (showLocationPoints) {
-            if (viewModel.locationPointsLayer == null) {
-                val debugLayer = LocationPointsLayer(viewModel.pathStorage)
-                viewModel.locationPointsLayer = debugLayer
-                mv.layerManager.layers.add(debugLayer)
+            /*if (viewModel.locationPointsLayer == null) {
+                val locationPointsLayer = LocationPointsLayer(viewModel.pathStorage)
+                viewModel.locationPointsLayer = locationPointsLayer
+                mv.layerManager.layers.add(locationPointsLayer)
+            }*/
+            if (viewModel.rawGpsPointsLayer == null) {
+                val rawGpsPointsLayer = RawGpsPointsLayer(viewModel.routeRecorder)
+                viewModel.rawGpsPointsLayer = rawGpsPointsLayer
+                mv.layerManager.layers.add(rawGpsPointsLayer)
             }
         } else {
-            viewModel.locationPointsLayer?.let { layer ->
+            /*viewModel.locationPointsLayer?.let { layer ->
                 mv.layerManager.layers.remove(layer)
                 viewModel.locationPointsLayer = null
+            }*/
+            viewModel.rawGpsPointsLayer?.let { layer ->
+                mv.layerManager.layers.remove(layer)
+                viewModel.rawGpsPointsLayer = null
             }
         }
         mv.layerManager.redrawLayers()
@@ -164,6 +174,11 @@ fun HomeEffects(
                 Lifecycle.Event.ON_STOP -> {
                     LocationTrackingService.Companion.useBackgroundUpdates(context)
                     Log.d("StepByStep_v1.0_TAG", "Using background location updates")
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    // Invalidate projection cache so all chains re-project on next draw
+                    viewModel.pathStorage.chains.values.flatten().forEach { it.dirty = true }
+                    viewModel.sharedMapView?.layerManager?.redrawLayers()
                 }
 
                 else -> Unit

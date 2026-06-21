@@ -31,6 +31,7 @@ import org.mapsforge.core.model.LatLong
 import com.example.stepmap_v10.chains.PathStorage
 import com.example.stepmap_v10.paths.SegmentIndex
 import com.example.stepmap_v10.chains.AppRouteRecorder
+import com.example.stepmap_v10.chains.RecordedPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -223,6 +224,7 @@ class LocationTrackingService: Service() {
                 } else {
                     storage.lastActiveMovementType
                 }
+                AppRouteRecorder.instance?.recordPoint(location.latitude, location.longitude, movementType)
                 storage.onGpsPoint(LatLong(location.latitude, location.longitude), effectiveType, index)
             }
         }

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Icon
@@ -71,36 +73,24 @@ fun Screen() {
 
 @Composable
 fun NavBar(modifier: Modifier = Modifier, currentPage: Int, onPageChange: (Int) -> Unit) {
-    val selectedColor = Color(red = 0, green = 0, blue = 0, 32);
+    val selectedColor = Color(red = 0, green = 0, blue = 0, 0); // used to be alpha 32
 
     Row(
         modifier
             .fillMaxWidth()
-            .background(Color(red = 232, green = 232, blue = 232, 255), shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
+            .background(Color(red = 240, green = 240, blue = 240, 144), shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceAround,
     ) {
         NavBarIsland(
-            modifier  = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).then(
-                if (currentPage == 0){
-                    Modifier.background(selectedColor, shape = RoundedCornerShape(12.dp))
-                } else {
-                    Modifier
-                }
-            ),
-            icon = Icons.Outlined.Home,
+            modifier  = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)),
+            icon = if (currentPage == 1) Icons.Outlined.Home else Icons.Filled.Home,
             description = "Home",
             onClick = { onPageChange(0) })
         NavBarIsland(
-            modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).then(
-                if (currentPage == 1){
-                    Modifier.background(selectedColor, shape = RoundedCornerShape(12.dp))
-                } else {
-                    Modifier
-                }
-            ),
-            icon = Icons.Outlined.Person,
+            modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)),
+            icon = if (currentPage == 0) Icons.Outlined.Person else Icons.Filled.Person,
             description = "Profile",
             onClick = { onPageChange(1) })
     }

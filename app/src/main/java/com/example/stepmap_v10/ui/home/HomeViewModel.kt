@@ -23,7 +23,7 @@ import com.example.stepmap_v10.tracking.AppSegmentIndex
 import com.example.stepmap_v10.tracking.TrackingLiveState
 import com.example.stepmap_v10.tracking.loadIsDrawing
 import com.example.stepmap_v10.chains.AppRouteRecorder
-import com.example.stepmap_v10.chains.LocationPointsLayer
+import com.example.stepmap_v10.chains.RawGpsPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.MovementType
@@ -40,7 +40,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val pathOverlayLayer = PathOverlayLayer(pathStorage).also {
         pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
     }
-    var locationPointsLayer: LocationPointsLayer? = null
+    var rawGpsPointsLayer: RawGpsPointsLayer? = null
     var showLocationPoints by mutableStateOf(false)
     var showPathColorChoice by mutableStateOf(false)
 
@@ -76,6 +76,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /* Displayed on map (initialize and continuously update) */
         loadFilesAndPaths()
         startRedrawLoop()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            routeRecorder.cleanStillPointsFromSavedRoutes(getApplication())
+        }
     }
 
 
@@ -129,10 +133,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             var wasDrawing = false
             TrackingLiveState.isDrawing.collect { drawing ->
                 if (wasDrawing && !drawing) {
+                    AppRouteRecorder.instance?.stopAndSave(getApplication())
+
                     withContext(Dispatchers.Default) {
                         pathStorage.finalizeSession()
                         pathStorage.mergeChainsByType()
                     }
+                    preProjectAllZoomLevels()
                     saveChainsNow()
                     sharedMapView?.layerManager?.redrawLayers()
                 }
@@ -173,9 +180,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun replayRoute(context: Context, fileName: String) {
+        /*
+        If the user selects a specific path, this function loads and displays previously saved
+        walked paths. Is not called for the current path.
+        */
         isReplayingRoute = true
         viewModelScope.launch(Dispatchers.Default) {
             pathStorage.clearSegments()
+            routeRecorder.loadForDisplay(context, fileName)
             var lastLat: Double? = null
             var lastLon: Double? = null
             var lastTimestamp: Long? = null
@@ -230,31 +242,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
             saveChainsNow()
         }
-        /*
-        If the user selects a specific path, this function loads and displays previously saved
-        walked paths. Is not called for the current path.
-        TODO: when current path is not saved ask whether user wants it saved before displaying, or
-         make display temporary with current path as default
-
-        isReplayingRoute = true
-        viewModelScope.launch(Dispatchers.Default) {
-            pathStorage.clearSegments()
-            routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
-                val index = AppSegmentIndex.instance ?: return@loadAndReplay
-                pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
-            }
-            pathStorage.finalizeSession()
-            pathStorage.mergeChainsByType()
-
-            preProjectAllZoomLevels()
-
-            withContext(Dispatchers.Main) {
-                sharedMapView?.layerManager?.redrawLayers()
-                isReplayingRoute = false
-            }
-
-            saveChainsNow()
-        }*/
     }
 
     override fun onCleared() {

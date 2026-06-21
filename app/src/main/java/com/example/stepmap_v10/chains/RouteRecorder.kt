@@ -2,6 +2,7 @@ package com.example.stepmap_v10.chains
 
 import android.content.Context
 import com.example.stepmap_v10.tracking.MovementType
+import com.example.stepmap_v10.ui.preferences.MovementColorDropdown
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -14,6 +15,8 @@ object AppRouteRecorder {
 
 class RouteRecorder {
     private val recordedPoints = mutableListOf<RecordedPoint>()
+    val points: List<RecordedPoint> get() = recordedPoints.toList()
+    val displayPoints = mutableListOf<RecordedPoint>()
     var isRecording = false
         private set
 
@@ -23,12 +26,14 @@ class RouteRecorder {
     }
 
     fun recordPoint(lat: Double, lon: Double, movementType: MovementType) {
-        if (!isRecording) return
+        if (!isRecording || movementType == MovementType.STILL) return
         recordedPoints.add(RecordedPoint(lat, lon, System.currentTimeMillis(), movementType))
     }
 
     fun stopAndSave(context: Context): String {
         isRecording = false
+        displayPoints.clear()
+        displayPoints.addAll(recordedPoints)
         val fileName = "route_${System.currentTimeMillis()}.json"
         val json = Json { prettyPrint = false }
         val text = json.encodeToString(RecordedRoute.serializer(), RecordedRoute(recordedPoints.toList()))
@@ -56,17 +61,27 @@ class RouteRecorder {
         return route.points.size
     }
 
-    /*fun loadAndReplay(
-        context: Context,
-        fileName: String,
-        onPoint: (lat: Double, lon: Double, movementType: MovementType) -> Unit
-    ): Int {
-        val text = File(context.filesDir, fileName).readText()
+    fun loadForDisplay(context: Context, fileName: String) {
         val json = Json { ignoreUnknownKeys = true }
-        val route = json.decodeFromString<RecordedRoute>(text)
-        route.points.forEach { onPoint(it.lat, it.lon, it.movementType) }
-        return route.points.size
-    }*/
+        val route = json.decodeFromString<RecordedRoute>(File(context.filesDir, fileName).readText())
+        displayPoints.clear()
+        displayPoints.addAll(route.points)
+    }
+
+    fun cleanStillPointsFromSavedRoutes(context: Context) {
+        val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+        context.filesDir.listFiles()
+            ?.filter { it.name.startsWith("route_") && it.name.endsWith(".json") }
+            ?.forEach { file ->
+                try {
+                    val route = json.decodeFromString<RecordedRoute>(file.readText())
+                    val filtered = route.points.filter { it.movementType != MovementType.STILL }
+                    file.writeText(json.encodeToString(RecordedRoute.serializer(), RecordedRoute(filtered)))
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+    }
 }
 
 @kotlinx.serialization.Serializable
