@@ -4,6 +4,7 @@ import com.example.stepmap_v10.tracking.MovementType
 import org.mapsforge.core.model.LatLong
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import com.example.stepmap_v10.colorMap
+import com.example.stepmap_v10.defaultColorMap
 
 /* PATH UTILS */
 fun List<Path>.toSegments(): List<Segment>{
@@ -25,8 +26,12 @@ fun List<Path>.toSegments(): List<Segment>{
 
 /* DRAW PATHS */
 
-fun colorForMovementType(movementType: MovementType): Int {
-    return colorMap.getOrElse(movementType,{ AndroidGraphicFactory.INSTANCE.createColor(255, 255, 255, 255) })
+fun colorForMovementType(movementType: MovementType, useCustomColors: Boolean): Int {
+    return if (useCustomColors) {
+        colorMap[movementType] ?: defaultColorMap[movementType] ?: AndroidGraphicFactory.INSTANCE.createColor(255, 255, 255, 255)
+    } else {
+        defaultColorMap[movementType] ?: AndroidGraphicFactory.INSTANCE.createColor(255, 255, 255, 255)
+    }
 }
 
 fun strokeWidthComputer(zoom: Float): Float {

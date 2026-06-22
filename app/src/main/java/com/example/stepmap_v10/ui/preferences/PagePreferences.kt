@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -20,6 +21,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
@@ -30,12 +32,21 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.stepmap_v10.defaultColorMap
 import com.example.stepmap_v10.colorMap
 import com.example.stepmap_v10.tracking.MovementType
 import com.example.stepmap_v10.ui.home.HomeViewModel
 
-fun handleSelect(movementType: MovementType, color: Int) {
+import com.github.skydoves.colorpicker.compose.HsvColorPicker
+import com.github.skydoves.colorpicker.compose.AlphaSlider
+import com.github.skydoves.colorpicker.compose.BrightnessSlider
+import com.github.skydoves.colorpicker.compose.rememberColorPickerController
+
+
+
+fun handleColorSelect(movementType: MovementType, color: Int, viewModel: HomeViewModel) {
     colorMap[movementType] = color
+    viewModel.saveColorMap()
 }
 
 val colorNamesToValues = mapOf(
@@ -56,22 +67,9 @@ val colorValuesToNames = colorNamesToValues.entries.associate { (name, value) ->
 @Preview
 @Composable
 fun Page_Preferences(viewModel: HomeViewModel = viewModel()) {
-    val movementColorSelections = remember {
-        mutableStateMapOf<MovementType, String>().apply {
-            MovementType.entries.forEachIndexed { index, movementType ->
-                val currentColor = colorMap[movementType]
-
-                val currentColorName = colorNamesToValues.entries
-                    .firstOrNull { it.value == currentColor }
-                    ?.key
-
-                this[movementType] = currentColorName
-                    ?: colorNamesToValues.keys.elementAt(index % colorNamesToValues.size)
-            }
-        }
-    }
 
     Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp).verticalScroll(rememberScrollState())) {
+        Spacer(modifier = Modifier.height(20.dp))
         Box(modifier = Modifier.fillMaxWidth().background(AltColor(0xFFF0F0F0), shape = RoundedCornerShape(20.dp))){
             Column(modifier = Modifier.fillMaxWidth().padding(top = 32.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally){
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(100.dp)) {
@@ -104,12 +102,11 @@ fun Page_Preferences(viewModel: HomeViewModel = viewModel()) {
 
                 if(viewModel.showPathColorChoice){
                     for (movementType in MovementType.entries) {
-                        MovementColorDropdown(
+                        MovementColorPicker(
                             movementType = movementType,
-                            selections = movementColorSelections
+                            viewModel = viewModel
                         )
-
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
 
@@ -175,9 +172,105 @@ fun SquareSwitch(
     }
 }
 
+@Composable
+fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
+    var showDialog by remember {mutableStateOf(false)}
+    val currentColor = colorMap[movementType] ?: Color.GRAY
+    val hexCode = remember { mutableStateOf("") }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(8.dp).clickable{showDialog = true},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = movementType.name.lowercase().replaceFirstChar { it.uppercase() },
+            fontSize = 16.sp
+        )
+        Box(
+            modifier = Modifier.size(32.dp)
+                .background(ComposeColor(currentColor), RoundedCornerShape(8.dp))
+                .clickable { showDialog = true }
+        )
+    }
+
+    if(showDialog){
+        val controller = rememberColorPickerController()
+
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(movementType.name.lowercase().replaceFirstChar { it.uppercase() }) },
+            text = {
+                Column {
+                    HsvColorPicker(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        controller = controller,
+                        initialColor = ComposeColor(currentColor)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    AlphaSlider(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(24.dp),
+                        controller = controller
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    BrightnessSlider(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(24.dp),
+                        controller = controller
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = "#${hexCode.value}",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Hex") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val color = controller.selectedColor.value
+                    val argb = android.graphics.Color.argb(
+                        (color.alpha * 255).toInt(),
+                        (color.red * 255).toInt(),
+                        (color.green * 255).toInt(),
+                        (color.blue * 255).toInt()
+                    )
+                    handleColorSelect(movementType, argb, viewModel)
+                    showDialog = false
+                }) {
+                    Text("Apply")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        val defaultColor = defaultColorMap[movementType]
+                        if (defaultColor != null) {
+                            handleColorSelect(movementType, defaultColor, viewModel)
+                        }
+                        showDialog = false
+                    }) {
+                        Text("Reset")
+                    }
+                    TextButton(onClick = { showDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MovementColorDropdown(movementType: MovementType, selections: SnapshotStateMap<MovementType, String>, modifier: Modifier = Modifier) {
+fun MovementColorDropdown(movementType: MovementType, selections: SnapshotStateMap<MovementType, String>, modifier: Modifier = Modifier, viewModel: HomeViewModel) {
     var expanded by remember { mutableStateOf(false) }
     val selectedColorName = selections[movementType] ?: colorNamesToValues.keys.first()
     val usedColorsByOtherMovementTypes = selections.filterKeys { it != movementType }.values.toSet()
@@ -218,7 +311,7 @@ fun MovementColorDropdown(movementType: MovementType, selections: SnapshotStateM
                     },
                     onClick = {
                         selections[movementType] = colorName
-                        handleSelect(movementType, colorValue)
+                        handleColorSelect(movementType, colorValue, viewModel)
                         expanded = false
                     }
                 )

@@ -25,6 +25,7 @@ import com.example.stepmap_v10.tracking.loadIsDrawing
 import com.example.stepmap_v10.chains.AppRouteRecorder
 import com.example.stepmap_v10.chains.RawGpsPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
+import com.example.stepmap_v10.colorMap
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.MovementType
 import kotlinx.coroutines.runBlocking
@@ -32,6 +33,8 @@ import org.mapsforge.core.model.LatLong
 
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
+
+    // HOME PAGE
     val routeRecorder = RouteRecorder()
     var isReplayingRoute by mutableStateOf(false)
     
@@ -41,8 +44,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
     }
     var rawGpsPointsLayer: RawGpsPointsLayer? = null
-    var showLocationPoints by mutableStateOf(false)
-    var showPathColorChoice by mutableStateOf(false)
 
     var allPaths by mutableStateOf<List<Path>>(emptyList())
     var mapFilePath by mutableStateOf<String?>(null)
@@ -54,6 +55,44 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     var hasChainsToDisplay by mutableStateOf(false)
         private set
 
+    /* PREFERENCES PAGE */
+    private val prefs = getApplication<Application>().getSharedPreferences("stepbystep_prefs", Context.MODE_PRIVATE)
+
+    private var _showLocationPoints by mutableStateOf(prefs.getBoolean("showLocationPoints", false))
+    var showLocationPoints: Boolean
+        get() = _showLocationPoints
+        set(value) {
+            _showLocationPoints = value
+            prefs.edit().putBoolean("showLocationPoints", value).apply()
+        }
+
+    private var _showPathColorChoice by mutableStateOf(prefs.getBoolean("showPathColorChoice", false))
+    var showPathColorChoice: Boolean
+        get() = _showPathColorChoice
+        set(value) {
+            _showPathColorChoice = value
+            prefs.edit().putBoolean("showPathColorChoice", value).apply()
+            pathOverlayLayer.useCustomColors = value
+            pathOverlayLayer.clearPaintCache()
+            sharedMapView?.layerManager?.redrawLayers()
+        }
+
+    fun loadColorMap() {
+        MovementType.entries.forEach { movementType ->
+            val default = colorMap[movementType] ?: return@forEach
+            colorMap[movementType] = prefs.getInt("color_${movementType.name}", default)
+        }
+    }
+
+    fun saveColorMap() {
+        val editor = prefs.edit()
+        colorMap.forEach { (movementType, color) ->
+            editor.putInt("color_${movementType.name}", color)
+        }
+        editor.apply()
+        pathOverlayLayer.clearPaintCache()
+        sharedMapView?.layerManager?.redrawLayers()
+    }
 
     init {
         /* Initial instances */
@@ -80,6 +119,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             routeRecorder.cleanStillPointsFromSavedRoutes(getApplication())
         }
+
+        /*PREFERENCES PAGE */
+        loadColorMap()
+        pathOverlayLayer.useCustomColors = showPathColorChoice
     }
 
 
@@ -270,9 +313,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         Is called in the background to speed up zooming in and out of replayed paths.
         */
         withContext(Dispatchers.Default) {
-            for (zoom in 12..18) {
-                pathOverlayLayer.preProjectAll(pathStorage.chains, zoom.toByte())
-            }
+            val zoomLevel = sharedMapView?.model?.mapViewPosition?.zoomLevel ?: 15
+            pathOverlayLayer.preProjectAll(pathStorage.chains, zoomLevel)
         }
     }
 }

@@ -72,25 +72,13 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             mapView = viewModel.sharedMapView,
             viewModel = viewModel,
 
-            pathStorage = viewModel.pathStorage,
             pathOverlayLayer = viewModel.pathOverlayLayer,
-            segmentIndex = viewModel.segmentIndex,
 
             isDrawing = isDrawing,
-            latestLivePoint = latestLivePoint,
-            liveMovementType = liveMovementType,
 
             permissionLauncher = permissionLauncher,
             hasLocationPermission = hasLocationPermission,
             onLocationPermissionChange = { granted -> hasLocationPermission = granted },
-
-            onError = { message -> errorMessage = message },
-
-            onMapViewReady = { readyMapView ->
-                if (viewModel.sharedMapView == null) {
-                    viewModel.sharedMapView = readyMapView
-                }
-            }
         )
 
         /* FRONTEND */

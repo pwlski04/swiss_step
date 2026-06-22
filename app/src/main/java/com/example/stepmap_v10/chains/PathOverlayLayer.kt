@@ -11,6 +11,7 @@ import org.mapsforge.core.model.Rotation
 import org.mapsforge.core.util.MercatorProjection
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.layer.Layer
+import org.mapsforge.map.model.DisplayModel
 import java.util.concurrent.ConcurrentHashMap
 
 
@@ -21,6 +22,9 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
     private val projectionCache =
         ConcurrentHashMap<Long, HashMap<Byte, List<Pair<Double, Double>>>>()
 
+    var useCustomColors: Boolean = false
+
+
     override fun draw(
         boundingBox: BoundingBox,
         zoomLevel: Byte,
@@ -28,6 +32,7 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
         topLeftPoint: Point,
         rotation: Rotation
     ) {
+        val dm = displayModel ?: return
         val w = canvas.width.toDouble()
         val h = canvas.height.toDouble()
 
@@ -42,7 +47,7 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
                 val zoomCache = projectionCache.getOrPut(chain.id) { HashMap() }
                 if (chain.dirty || !zoomCache.containsKey(zoomLevel)) {
                     zoomCache.clear()
-                    zoomCache[zoomLevel] = projectChain(chain, zoomLevel)
+                    zoomCache[zoomLevel] = projectChain(chain, zoomLevel, dm)
                     chain.dirty = false
                 }
                 drawProjectedChain(zoomCache[zoomLevel]!!, topLeftPoint, canvas, paint, w, h)
@@ -74,6 +79,10 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
         projectionCache.remove(chainId)
     }
 
+    fun clearPaintCache(){
+        paintCache.clear()
+    }
+
     companion object {
         val DRAW_ORDER = listOf(
             MovementType.STILL,
@@ -87,16 +96,16 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
     fun getPaint(movementType: MovementType, zoomLevel: Byte): Paint {
         return paintCache.getOrPut(Pair(movementType, zoomLevel)) {
             AndroidGraphicFactory.INSTANCE.createPaint().apply {
-                color = colorForMovementType(movementType)
+                color = colorForMovementType(movementType, useCustomColors)
                 strokeWidth = strokeWidthComputer(zoomLevel.toFloat())
             }
         }
     }
 
-    private fun projectChain(chain: PathChain, zoomLevel: Byte): List<Pair<Double, Double>> {
-        val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
+    private fun projectChain(chain: PathChain, zoomLevel: Byte, dm: DisplayModel): List<Pair<Double, Double>> {
+        val mapSize = MercatorProjection.getMapSize(zoomLevel, dm.tileSize)
         val points = synchronized(chain) { chain.points.toList() }
-        return points.map { latLong ->
+        return points.filterNotNull().map { latLong ->
             Pair(
                 MercatorProjection.longitudeToPixelX(latLong.longitude, mapSize),
                 MercatorProjection.latitudeToPixelY(latLong.latitude, mapSize)
@@ -117,12 +126,12 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
     }
 
     fun preProjectAll(chains: Map<MovementType, List<PathChain>>, zoomLevel: Byte) {
-        if (displayModel == null) return  // not attached to map yet — skip
+        val dm = displayModel ?: return  // not attached to map yet -> skip (thread-safe)
         for (chainList in chains.values) {
             for (chain in chainList) {
                 val zoomCache = projectionCache.getOrPut(chain.id) { HashMap() }
                 if (!zoomCache.containsKey(zoomLevel)) {
-                    zoomCache[zoomLevel] = projectChain(chain, zoomLevel)
+                    zoomCache[zoomLevel] = projectChain(chain, zoomLevel, dm)
                     chain.dirty = false
                 }
             }

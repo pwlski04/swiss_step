@@ -14,17 +14,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
-import com.example.stepmap_v10.chains.LocationPointsLayer
 import com.example.stepmap_v10.chains.PathOverlayLayer
 import com.example.stepmap_v10.map.applySmoothMapForceField
-import com.example.stepmap_v10.paths.PathPoint
-import com.example.stepmap_v10.paths.SegmentIndex
 import com.example.stepmap_v10.tracking.LocationTrackingService
-import com.example.stepmap_v10.tracking.MovementType
 import com.example.stepmap_v10.tracking.TrackingLiveState
 import kotlinx.coroutines.delay
 import org.mapsforge.map.android.view.MapView
-import com.example.stepmap_v10.chains.PathStorage
 import com.example.stepmap_v10.chains.RawGpsPointsLayer
 
 
@@ -36,25 +31,29 @@ fun HomeEffects(
     mapView: MapView?,
     viewModel: HomeViewModel,
 
-    pathStorage: PathStorage,
     pathOverlayLayer: PathOverlayLayer,
-    segmentIndex: SegmentIndex?,
 
     isDrawing: Boolean,
-    latestLivePoint: PathPoint?,
-    liveMovementType: MovementType,
-    //locationMarker: LocationMarker,
     showLocationPoints: Boolean = viewModel.showLocationPoints,
 
     permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
     hasLocationPermission: Boolean,
     onLocationPermissionChange: (Boolean) -> Unit,
 
-    onError: (String) -> Unit,
-
-    onMapViewReady: (MapView) -> Unit,
     ){
-    //TODO: REMOVE
+
+    LaunchedEffect(mapView) {
+        val mv = mapView ?: return@LaunchedEffect
+
+        // Apply persisted showLocationPoints state on map ready
+        if (viewModel.showLocationPoints && viewModel.rawGpsPointsLayer == null) {
+            val layer = RawGpsPointsLayer(viewModel.routeRecorder)
+            viewModel.rawGpsPointsLayer = layer
+            mv.layerManager.layers.add(layer)
+            mv.layerManager.redrawLayers()
+        }
+    }
+
     LaunchedEffect(mapView) {
         val mv = mapView ?: return@LaunchedEffect
         if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
@@ -70,21 +69,12 @@ fun HomeEffects(
         val mv = mapView ?: return@LaunchedEffect
 
         if (showLocationPoints) {
-            /*if (viewModel.locationPointsLayer == null) {
-                val locationPointsLayer = LocationPointsLayer(viewModel.pathStorage)
-                viewModel.locationPointsLayer = locationPointsLayer
-                mv.layerManager.layers.add(locationPointsLayer)
-            }*/
             if (viewModel.rawGpsPointsLayer == null) {
                 val rawGpsPointsLayer = RawGpsPointsLayer(viewModel.routeRecorder)
                 viewModel.rawGpsPointsLayer = rawGpsPointsLayer
                 mv.layerManager.layers.add(rawGpsPointsLayer)
             }
         } else {
-            /*viewModel.locationPointsLayer?.let { layer ->
-                mv.layerManager.layers.remove(layer)
-                viewModel.locationPointsLayer = null
-            }*/
             viewModel.rawGpsPointsLayer?.let { layer ->
                 mv.layerManager.layers.remove(layer)
                 viewModel.rawGpsPointsLayer = null
@@ -135,15 +125,6 @@ fun HomeEffects(
         if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
             mv.layerManager.layers.add(pathOverlayLayer)
         }
-        /*if (!mv.layerManager.layers.contains(locationMarker)) {
-            mv.layerManager.layers.add(locationMarker)
-        }*/
-    }
-
-    LaunchedEffect(latestLivePoint, mapView) {
-        val mv = mapView ?: return@LaunchedEffect
-        val point = latestLivePoint ?: return@LaunchedEffect
-        //locationMarker.update(mv, point.lat, point.lon)
     }
 
     LaunchedEffect(isDrawing) {

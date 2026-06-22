@@ -73,4 +73,6 @@ dependencies {
 
     implementation("org.json:json:20240303")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    implementation("com.github.skydoves:colorpicker-compose:1.2.0")
 }
