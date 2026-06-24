@@ -3,6 +3,7 @@ package com.example.stepmap_v10.ui
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -102,13 +104,10 @@ fun NavBarIsland(modifier: Modifier, icon: ImageVector?, description: String, on
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() }
+            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onClick() }
             .padding(8.dp),
     ) {
-        Box(
-            contentAlignment = Alignment.Center, modifier = Modifier
-                .size(24.dp)
-        ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
             if (icon != null) {
                 Icon(imageVector = icon, contentDescription = description, tint = Color.Black)
             }
