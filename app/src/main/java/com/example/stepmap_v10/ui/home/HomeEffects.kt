@@ -3,24 +3,30 @@ package com.example.stepmap_v10.ui.home
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.activity.compose.ManagedActivityResultLauncher
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.stepmap_v10.chains.PathOverlayLayer
-import com.example.stepmap_v10.map.applySmoothMapForceField
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.TrackingLiveState
-import kotlinx.coroutines.delay
 import org.mapsforge.map.android.view.MapView
 import com.example.stepmap_v10.chains.RawGpsPointsLayer
+import com.example.stepmap_v10.tracking.loadTrackingSessionId
+import kotlinx.coroutines.Job
 
 
 @Composable
@@ -40,7 +46,14 @@ fun HomeEffects(
     hasLocationPermission: Boolean,
     onLocationPermissionChange: (Boolean) -> Unit,
 
+    zoomInJob: Job?,
+    zoomOutJob: Job?
     ){
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* no action needed on result */ }
+    var lastKnownZoom by remember { mutableStateOf<Byte?>(null) }
+
 
     LaunchedEffect(mapView) {
         val mv = mapView ?: return@LaunchedEffect
@@ -115,17 +128,19 @@ fun HomeEffects(
         ) == PackageManager.PERMISSION_GRANTED
         onLocationPermissionChange(granted)
         if (!granted) permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val notificationGranted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!notificationGranted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     /* UPDATE LOCATION MARKER WHEN CURRENT LOCATION MOVES */
     /* UPDATE PATH WITH LOCATION MARKER IF DRAWING IS ON */
-
-    LaunchedEffect(mapView) {
-        val mv = mapView ?: return@LaunchedEffect
-        if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
-            mv.layerManager.layers.add(pathOverlayLayer)
-        }
-    }
 
     LaunchedEffect(isDrawing) {
         TrackingLiveState.isDrawing.value = isDrawing
@@ -133,28 +148,26 @@ fun HomeEffects(
 
 
     /* OTHER */
-
-    LaunchedEffect(mapView) {
-        while (mapView != null) {
-            mapView?.let {
-                applySmoothMapForceField(it)
-            }
-
-            delay(16L)
-        }
-    }
-
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> {
-                    LocationTrackingService.Companion.useForegroundUpdates(context)
-                    Log.d("StepByStep_v1.0_TAG", "Using foreground location updates")
+                    if(hasLocationPermission){
+                        LocationTrackingService.Companion.useForegroundUpdates(context)
+                        Log.d("StepByStep_v1.0_TAG", "Using foreground location updates")
+                    } else {
+                        val sessionId = loadTrackingSessionId(context)
+                        LocationTrackingService.restartForForeground(context, sessionId)
+                    }
                 }
 
                 Lifecycle.Event.ON_STOP -> {
-                    LocationTrackingService.Companion.useBackgroundUpdates(context)
-                    Log.d("StepByStep_v1.0_TAG", "Using background location updates")
+                    if(TrackingLiveState.isDrawing.value){
+                        LocationTrackingService.Companion.useBackgroundUpdates(context)
+                        Log.d("StepByStep_v1.0_TAG", "Using background location updates")
+                    } else {
+                        LocationTrackingService.stop(context)
+                    }
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     // Invalidate projection cache so all chains re-project on next draw

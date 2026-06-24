@@ -29,6 +29,8 @@ import com.example.stepmap_v10.chains.RouteRecorder
 import com.example.stepmap_v10.colorMap
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.MovementType
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runBlocking
 import org.mapsforge.core.model.LatLong
 
@@ -57,6 +59,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     var longPressedRecording: String? by mutableStateOf(null)
+    private var replayJob: Job? = null
     var selectedRecording: String? by mutableStateOf(null);
 
     var savedRoutes = mutableStateListOf<String>()
@@ -245,11 +248,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         If the user selects a specific path, this function loads and displays previously saved
         walked paths. Is not called for the current path.
         */
+        replayJob?.cancel()
         isReplayingRoute = true
         selectedRecording = fileName
-        viewModelScope.launch(Dispatchers.Default) {
-            pathStorage.isReplaying = true
 
+        replayJob = viewModelScope.launch(Dispatchers.Default) {
+            pathStorage.isReplaying = true
             pathStorage.clearSegments()
             routeRecorder.loadForDisplay(context, fileName)
 
@@ -260,6 +264,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             var lastBearing: Double? = null
 
             routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
+                ensureActive()
+
                 val pLat = lastLat; val pLon = lastLon; val pTime = lastTimestamp
 
                 var shouldSkip = false
@@ -295,6 +301,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index, isReplayPoint = true)
             }
 
+            ensureActive()
             pathStorage.finalizeSession()
             pathStorage.mergeChainsByType()
             preProjectAllZoomLevels()

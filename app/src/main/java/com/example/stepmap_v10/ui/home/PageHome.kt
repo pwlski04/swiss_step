@@ -5,8 +5,11 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.material3.ripple
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -35,6 +38,7 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -43,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.stepmap_v10.accentColor1
 import com.example.stepmap_v10.accentColor2
+import com.example.stepmap_v10.accentColor3
 import com.example.stepmap_v10.map.LocationMarkerOverlay
 import com.example.stepmap_v10.map.centerMap
 import kotlinx.coroutines.Dispatchers
@@ -70,7 +75,8 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
     val scope = rememberCoroutineScope()
     var currentJob by remember { mutableStateOf<Job?>(null) }
-    var zoomJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var zoomInJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var zoomOutJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val interactionSource_zoomIn = remember { MutableInteractionSource() }
     val interactionSource_zoomOut = remember { MutableInteractionSource() }
@@ -93,6 +99,9 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             permissionLauncher = permissionLauncher,
             hasLocationPermission = hasLocationPermission,
             onLocationPermissionChange = { granted -> hasLocationPermission = granted },
+
+            zoomInJob = zoomInJob,
+            zoomOutJob = zoomOutJob
         )
 
         /* FRONTEND */
@@ -194,13 +203,14 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                         }
                     }
 
+                    // BUTTONS: Available routes
                     Row(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp, horizontal = 8.dp)){
                         viewModel.savedRoutes.forEach { fileName ->
                             Surface(
                                 color = accentColor2,
                                 modifier = Modifier.padding(6.dp)
                                     .clip(RoundedCornerShape(18.dp))
-                                    .background(if(viewModel.selectedRecording == fileName) Color.DarkGray else Color.Transparent)
+                                    .background(if(viewModel.selectedRecording == fileName) accentColor3 else Color.Transparent)
                                     .combinedClickable(
                                         onClick = {
                                             currentJob?.cancel()
@@ -209,6 +219,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                                 if (!isActive) return@launch
 
                                                 withContext(Dispatchers.Main) {
+                                                    val wasSelected = viewModel.selectedRecording == fileName
                                                     // Clear previous route
                                                     state.pathStorage.clearSegments()
                                                     viewModel.routeRecorder.displayPoints.clear()
@@ -217,8 +228,10 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                                     viewModel.sharedMapView?.layerManager?.redrawLayers()
 
                                                     // Load new route
-                                                    viewModel.routeRecorder.loadForDisplay(context, fileName)
-                                                    viewModel.replayRoute(context, fileName)
+                                                    if(!wasSelected){
+                                                        viewModel.routeRecorder.loadForDisplay(context, fileName)
+                                                        viewModel.replayRoute(context, fileName)
+                                                    }
                                                 }
                                             }
                                         },
@@ -230,7 +243,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 Text(
                                     text = fileName.removePrefix("route_").removeSuffix(".json"),
                                     fontSize = 12.sp,
-                                    modifier = Modifier.padding(14.dp)
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 14.dp)
                                 )
                             }
                         }
@@ -246,9 +259,15 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 color = if (isPressed) accentColor2.copy(alpha = 0.7f) else accentColor2,
                                 modifier = Modifier.padding(4.dp).clip(shape=RoundedCornerShape(18.dp)).combinedClickable(
                                     onClick = {
+                                        zoomInJob?.cancel()
+                                        zoomOutJob?.cancel()
+
                                         viewModel.sharedMapView.centerMap(point?.let { LatLong(it.lat, it.lon) } as LatLong)
                                     },
                                     onLongClick = {
+                                        zoomInJob?.cancel()
+                                        zoomOutJob?.cancel()
+
                                         viewModel.sharedMapView.centerMap(point?.let { LatLong(it.lat, it.lon) } as LatLong)
 
                                         viewModel.sharedMapView?.let { mv ->
@@ -274,27 +293,41 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 modifier = Modifier
                                     .padding(4.dp)
                                     .clip(RoundedCornerShape(18.dp))
-                                    .combinedClickable(
-                                        interactionSource = interactionSource_zoomIn,
-                                        indication = ripple(),
-                                        onClick = {
-                                            viewModel.sharedMapView?.let { mv ->
-                                                val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
-                                            }
-                                        },
-                                        onLongClick = {
-                                            zoomJob = scope.launch {
-                                                while (true) {
-                                                    viewModel.sharedMapView?.let { mv ->
-                                                        val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                        mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
-                                                    }
-                                                    delay(300L)
+                                    .indication(interactionSource_zoomIn, ripple())
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                zoomInJob?.cancel()
+                                                zoomOutJob?.cancel()
+                                                viewModel.sharedMapView?.let { mv ->
+                                                    val currentZoom = mv.model.mapViewPosition.zoomLevel
+                                                    mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
                                                 }
+                                            },
+                                            onLongPress = {
+                                                zoomOutJob?.cancel()
+                                                zoomInJob = scope.launch {
+                                                    while (true) {
+                                                        viewModel.sharedMapView?.let { mv ->
+                                                            val currentZoom = mv.model.mapViewPosition.zoomLevel
+                                                            mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
+                                                        }
+                                                        delay(150L)
+                                                    }
+                                                }
+                                            },
+                                            onPress = {
+                                                val press = PressInteraction.Press(it)
+                                                interactionSource_zoomIn.emit(press)
+
+                                                tryAwaitRelease()
+                                                interactionSource_zoomIn.emit(PressInteraction.Release(press))
+
+                                                zoomInJob?.cancel()
+                                                zoomInJob = null
                                             }
-                                        }
-                                    )
+                                        )
+                                    }
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Add,
@@ -311,27 +344,41 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 modifier = Modifier
                                     .padding(4.dp)
                                     .clip(RoundedCornerShape(18.dp))
-                                    .combinedClickable(
-                                        interactionSource = interactionSource_zoomOut,
-                                        indication = ripple(),
-                                        onClick = {
-                                            viewModel.sharedMapView?.let { mv ->
-                                                val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
-                                            }
-                                        },
-                                        onLongClick = {
-                                            zoomJob = scope.launch {
-                                                while (true) {
-                                                    viewModel.sharedMapView?.let { mv ->
-                                                        val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                        mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
-                                                    }
-                                                    delay(300L)
+                                    .indication(interactionSource_zoomOut, ripple())
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                zoomInJob?.cancel()
+                                                zoomOutJob?.cancel()
+                                                viewModel.sharedMapView?.let { mv ->
+                                                    val currentZoom = mv.model.mapViewPosition.zoomLevel
+                                                    mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
                                                 }
+                                            },
+                                            onLongPress = {
+                                                zoomInJob?.cancel()
+                                                zoomOutJob = scope.launch {
+                                                    while (true) {
+                                                        viewModel.sharedMapView?.let { mv ->
+                                                            val currentZoom = mv.model.mapViewPosition.zoomLevel
+                                                            mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
+                                                        }
+                                                        delay(150L)
+                                                    }
+                                                }
+                                            },
+                                            onPress = {
+                                                val press = PressInteraction.Press(it)
+                                                interactionSource_zoomOut.emit(press)
+
+                                                tryAwaitRelease()
+                                                interactionSource_zoomOut.emit(PressInteraction.Release(press))
+
+                                                zoomOutJob?.cancel()
+                                                zoomOutJob = null
                                             }
-                                        }
-                                    )
+                                        )
+                                    }
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Remove,
@@ -355,6 +402,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
     if (showDeleteDialog) {
         DeleteHistoryDialog(
+            viewModel,
             onSaveAndDelete = {
                 viewModel.routeRecorder.stopAndSave(context)
                 viewModel.refreshSavedRoutes()
@@ -431,6 +479,7 @@ private fun ShadowedButton(content: @Composable ()->Unit){
 
 @Composable
 private fun DeleteHistoryDialog(
+    viewModel: HomeViewModel,
     onSaveAndDelete: () -> Unit,
     onDeleteOnly: () -> Unit,
     onCancel: () -> Unit
@@ -443,9 +492,12 @@ private fun DeleteHistoryDialog(
                 Text("Do you want to save this route before deleting it?")
                 Spacer(modifier = Modifier.height(16.dp))
 
-                TextButton(onClick = onSaveAndDelete, modifier = Modifier.fillMaxWidth()) {
-                    Text("Save and delete")
+                if (viewModel.selectedRecording == null) {
+                    TextButton(onClick = onSaveAndDelete, modifier = Modifier.fillMaxWidth()) {
+                        Text("Save and delete")
+                    }
                 }
+
                 TextButton(onClick = onDeleteOnly, modifier = Modifier.fillMaxWidth()) {
                     Text("Delete")
                 }

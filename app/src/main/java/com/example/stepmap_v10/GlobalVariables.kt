@@ -22,3 +22,4 @@ var colorMap = mutableStateMapOf(
 
 val accentColor1 = DirectColor(red = 236, green = 236, blue = 236, 200)  // DirectColor(211, 226, 225, 144)
 val accentColor2 = DirectColor(red = 240, green = 240, blue = 240, 144)    // Color(red = 240, green = 240, blue = 240, 144)
+val accentColor3 = DirectColor(red = 180, green = 180, blue = 180, 144)    // Color(red = 240, green = 240, blue = 240, 144)
