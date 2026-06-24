@@ -55,14 +55,16 @@ fun LocationMarkerOverlay(
     }
 
     // To hide marker during zoom
-    val lastZoomRef = remember { mutableStateOf(mapView.model.mapViewPosition.zoomLevel) }
+    val zoomEventCounter = remember { mutableStateOf(0) }
 
     DisposableEffect(mapView, position) {
+        var lastZoom = mapView.model.mapViewPosition.zoomLevel
         val observer = Observer {
             val currentZoom = mapView.model.mapViewPosition.zoomLevel
-            if (currentZoom != lastZoomRef.value) {
-                lastZoomRef.value = currentZoom
+            if (currentZoom != lastZoom) {
+                lastZoom = currentZoom
                 isZoomingState.value = true
+                zoomEventCounter.value++
             }
             recalculate()
         }
@@ -81,6 +83,14 @@ fun LocationMarkerOverlay(
     DisposableEffect(mapView) {
         val touchListener = View.OnTouchListener { view, event ->
             if ((event?.pointerCount ?: 0) >= 2) isZoomingState.value = true
+            if (event?.action == MotionEvent.ACTION_UP ||
+                event?.action == MotionEvent.ACTION_POINTER_UP) {
+                zoomEventCounter.value++
+            }
+            if (event?.action == MotionEvent.ACTION_UP ||
+                event?.action == MotionEvent.ACTION_POINTER_UP) {
+                zoomEventCounter.value++
+            }
             if (event?.action == MotionEvent.ACTION_UP) view.performClick()
             false
         }
@@ -90,7 +100,7 @@ fun LocationMarkerOverlay(
         }
     }
 
-    LaunchedEffect(lastZoomRef.value) {
+    LaunchedEffect(zoomEventCounter.value) {
         delay(300L)  // delay after zoom
         isZoomingState.value = false
     }

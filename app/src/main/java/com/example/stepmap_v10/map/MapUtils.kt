@@ -1,6 +1,7 @@
 package com.example.stepmap_v10.map
 
 import android.content.Context
+import android.view.MotionEvent
 import org.mapsforge.core.model.LatLong
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.android.util.AndroidUtil
@@ -19,9 +20,6 @@ private const val ZURICH_MIN_LAT = 47.32
 private const val ZURICH_MAX_LAT = 47.43
 private const val ZURICH_MIN_LON = 8.44
 private const val ZURICH_MAX_LON = 8.63
-
-private const val RUBBER_BAND_LAT = 0.0035
-private const val RUBBER_BAND_LON = 0.0055
 
 
 /* CREATE MAP: */
@@ -69,90 +67,54 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
     mapView.setCenter(LatLong(47.3769, 8.5417))
     mapView.setZoomLevel(13.toByte())
 
+    constrainMapBounds(mapView)
+
     return mapView
 }
 
-
-fun applySmoothMapForceField(mapView: MapView) {
-    val center = mapView.model.mapViewPosition.center ?: return
-
-    val softMinLat = ZURICH_MIN_LAT - RUBBER_BAND_LAT
-    val softMaxLat = ZURICH_MAX_LAT + RUBBER_BAND_LAT
-    val softMinLon = ZURICH_MIN_LON - RUBBER_BAND_LON
-    val softMaxLon = ZURICH_MAX_LON + RUBBER_BAND_LON
-
-    /*
-     * Hard limit the maximum overscroll.
-     * This prevents fast swipes from flying far outside the map.
-     */
-    val limitedLat = center.latitude.coerceIn(softMinLat, softMaxLat)
-    val limitedLon = center.longitude.coerceIn(softMinLon, softMaxLon)
-
-    var targetLat = limitedLat
-    var targetLon = limitedLon
-
-    val outsideAmount = getOutsideAmount(
-        LatLong(
-            limitedLat,
-            limitedLon
-        )
+fun constrainMapBounds(mapView: MapView) {
+    val boundingBox = org.mapsforge.core.model.BoundingBox(
+        ZURICH_MIN_LAT, ZURICH_MIN_LON,
+        ZURICH_MAX_LAT, ZURICH_MAX_LON
     )
 
-    /*
-     * Dynamic force:
-     * tiny outside = soft
-     * far outside = strong resistance
-     */
-    val pullStrength = when {
-        outsideAmount > 0.006 -> 0.55
-        outsideAmount > 0.003 -> 0.35
-        else -> 0.18
-    }
-
-    if (limitedLat < ZURICH_MIN_LAT) {
-        targetLat = limitedLat + (ZURICH_MIN_LAT - limitedLat) * pullStrength
-    } else if (limitedLat > ZURICH_MAX_LAT) {
-        targetLat = limitedLat - (limitedLat - ZURICH_MAX_LAT) * pullStrength
-    }
-
-    if (limitedLon < ZURICH_MIN_LON) {
-        targetLon = limitedLon + (ZURICH_MIN_LON - limitedLon) * pullStrength
-    } else if (limitedLon > ZURICH_MAX_LON) {
-        targetLon = limitedLon - (limitedLon - ZURICH_MAX_LON) * pullStrength
-    }
-
-    val needsCorrection =
-        abs(targetLat - center.latitude) > 0.000003 ||
-                abs(targetLon - center.longitude) > 0.000003
-
-    if (needsCorrection) {
-        mapView.setCenter(
-            LatLong(
-                targetLat,
-                targetLon
-            )
-        )
-    }
+    mapView.model.mapViewPosition.setMapLimit(boundingBox)
 }
 
-fun getOutsideAmount(center: LatLong): Double {
-    val latOutside = when {
-        center.latitude < ZURICH_MIN_LAT -> ZURICH_MIN_LAT - center.latitude
-        center.latitude > ZURICH_MAX_LAT -> center.latitude - ZURICH_MAX_LAT
-        else -> 0.0
-    }
 
-    val lonOutside = when {
-        center.longitude < ZURICH_MIN_LON -> ZURICH_MIN_LON - center.longitude
-        center.longitude > ZURICH_MAX_LON -> center.longitude - ZURICH_MAX_LON
-        else -> 0.0
-    }
+fun MapView?.centerMap(point: LatLong){
+    if (this == null) return
+    if (width == 0 || height == 0) return
+    if (model?.mapViewPosition == null) return
 
-    return maxOf(latOutside, lonOutside)
+    // ACTION_DOWN cancels fling in any scrollable view
+    val downEvent = MotionEvent.obtain(
+        System.currentTimeMillis(),
+        System.currentTimeMillis(),
+        MotionEvent.ACTION_DOWN,
+        width / 2f,
+        height / 2f,
+        0
+    )
+    val cancelEvent = MotionEvent.obtain(
+        System.currentTimeMillis(),
+        System.currentTimeMillis(),
+        MotionEvent.ACTION_CANCEL,
+        width / 2f,
+        height / 2f,
+        0
+    )
+    dispatchTouchEvent(downEvent)
+    dispatchTouchEvent(cancelEvent)
+    downEvent.recycle()
+    cancelEvent.recycle()
+
+    model.mapViewPosition.setCenter(point)
 }
 
 
 /* HELPER FUNCTIONS */
+
 fun copyAssetToInternalStorage(context: Context, assetName: String): String {
     val outFile = File(context.filesDir, assetName)
     // Always copy — ensures updated assets are used
