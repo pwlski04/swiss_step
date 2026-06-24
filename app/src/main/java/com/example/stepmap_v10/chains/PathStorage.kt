@@ -40,6 +40,9 @@ class PathStorage {
     var onChainsChanged: (() -> Unit)? = null
     var lastActiveMovementType: MovementType = MovementType.TRANSPORT
 
+    var isReplaying = false
+    private val bufferedPoints = mutableListOf<Triple<LatLong, MovementType, Long>>()
+
     private val FILE_NAME = "walked_chains.json"
     private val json = Json { prettyPrint = false; ignoreUnknownKeys = true }
 
@@ -133,10 +136,16 @@ class PathStorage {
     }
 
     @Synchronized
-    fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex) {
+    fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex, isReplayPoint: Boolean = false) {
         if (movementType == MovementType.STILL) return
+
         lastActiveMovementType = movementType
         val now = System.currentTimeMillis()
+
+        if(isReplaying && !isReplayPoint){
+            bufferedPoints.add(Triple(gpsPoint, lastActiveMovementType, now))
+            return
+        }
 
         val bkps = backups.getOrPut(movementType) { mutableListOf() }
 
@@ -408,7 +417,7 @@ class PathStorage {
         onChainsChanged?.invoke()
     }
 
-    private fun bridgeMovementTypeGaps(index: SegmentIndex?) {
+    internal fun bridgeMovementTypeGaps(index: SegmentIndex?) {
         val threshold = 0.0008
 
         for (movementType in MovementType.entries) {
@@ -522,6 +531,16 @@ class PathStorage {
         return null
     }
 
+    /* Snapshotting and restoring */
+    @Synchronized
+    fun flushBufferedPoints(index: SegmentIndex) {
+        val toProcess = bufferedPoints.toList()
+        bufferedPoints.clear()
+        for ((point, type, timestamp) in toProcess) {
+            onGpsPoint(point, type, index)
+        }
+    }
+
 
     /* ── Persistence ── */
 
@@ -582,10 +601,6 @@ class PathStorage {
         File(context.filesDir, FILE_NAME).delete()
         File(context.filesDir, "$FILE_NAME.tmp").delete()
     }
-
-    fun totalPointCount(): Int = chains.values.sumOf { list -> list.sumOf { it.points.size } }
-    fun refreshHasChains(): Boolean = chains.values.any { it.isNotEmpty() }
-    fun isEmpty(): Boolean = MovementType.entries.all { chains[it].isNullOrEmpty() }
 }
 
 

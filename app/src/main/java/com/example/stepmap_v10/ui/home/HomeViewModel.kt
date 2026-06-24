@@ -3,6 +3,7 @@ package com.example.stepmap_v10.ui.home
 import android.app.Application
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -54,6 +55,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     var hasChainsToDisplay by mutableStateOf(false)
         private set
+
+    var longPressedRecording: String? by mutableStateOf(null)
+    var selectedRecording: String? by mutableStateOf(null);
+
+    var savedRoutes = mutableStateListOf<String>()
+
+    fun refreshSavedRoutes() {
+        viewModelScope.launch(Dispatchers.Main){
+            val newRoutes = withContext(Dispatchers.IO){
+                routeRecorder.listSavedRoutes(getApplication())
+            }
+            savedRoutes.clear()
+            savedRoutes.addAll(newRoutes)
+        }
+    }
 
     /* PREFERENCES PAGE */
     private val prefs = getApplication<Application>().getSharedPreferences("stepbystep_prefs", Context.MODE_PRIVATE)
@@ -120,6 +136,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             routeRecorder.cleanStillPointsFromSavedRoutes(getApplication())
         }
 
+        refreshSavedRoutes()
+
         /*PREFERENCES PAGE */
         loadColorMap()
         pathOverlayLayer.useCustomColors = showPathColorChoice
@@ -176,7 +194,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             var wasDrawing = false
             TrackingLiveState.isDrawing.collect { drawing ->
                 if (wasDrawing && !drawing) {
-                    AppRouteRecorder.instance?.stopAndSave(getApplication())
+                    //AppRouteRecorder.instance?.stopAndSave(getApplication())
 
                     withContext(Dispatchers.Default) {
                         pathStorage.finalizeSession()
@@ -228,9 +246,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         walked paths. Is not called for the current path.
         */
         isReplayingRoute = true
+        selectedRecording = fileName
         viewModelScope.launch(Dispatchers.Default) {
+            pathStorage.isReplaying = true
+
             pathStorage.clearSegments()
             routeRecorder.loadForDisplay(context, fileName)
+
             var lastLat: Double? = null
             var lastLon: Double? = null
             var lastTimestamp: Long? = null
@@ -254,8 +276,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     val bearingChanged = lastBearing != null &&
                             Math.abs(((bearing - lastBearing!! + 540) % 360) - 180) > 25.0
 
-                    shouldSkip = distMeters < 4.0 && timeDiff < 4000 &&
-                            !typeChanged && !bearingChanged
+                    shouldSkip = distMeters < 4.0 && timeDiff < 4000 && !typeChanged && !bearingChanged
                 }
 
                 if (shouldSkip) return@loadAndReplay
@@ -264,16 +285,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 if (pLat != null && pLon != null) {
                     val dLat = lat - pLat; val dLon = lon - pLon
                     val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
-                    if (distMeters > 2.0) {
-                        lastBearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
-                    }
+                    if (distMeters > 2.0) lastBearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
                 }
 
                 lastLat = lat; lastLon = lon; lastTimestamp = timestamp
                 lastMovementType = movementType
 
                 val index = AppSegmentIndex.instance ?: return@loadAndReplay
-                pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
+                pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index, isReplayPoint = true)
             }
 
             pathStorage.finalizeSession()
@@ -283,7 +302,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 sharedMapView?.layerManager?.redrawLayers()
                 isReplayingRoute = false
             }
-            saveChainsNow()
+
+            //pathStorage.restoreSnapshot(snapshot)
+            pathStorage.isReplaying = false
+            withContext(Dispatchers.IO) {
+                pathStorage.load(getApplication())
+            }
+            AppSegmentIndex.instance?.let { index ->
+                pathStorage.flushBufferedPoints(index)
+            }
+            preProjectAllZoomLevels()
+            withContext(Dispatchers.Main) {
+                sharedMapView?.layerManager?.redrawLayers()
+            }
         }
     }
 
