@@ -24,9 +24,10 @@ import com.example.stepmap_v10.tracking.AppSegmentIndex
 import com.example.stepmap_v10.tracking.TrackingLiveState
 import com.example.stepmap_v10.tracking.loadIsDrawing
 import com.example.stepmap_v10.chains.AppRouteRecorder
-import com.example.stepmap_v10.chains.RawGpsPointsLayer
+import com.example.stepmap_v10.map.RawGpsPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
 import com.example.stepmap_v10.colorMap
+import com.example.stepmap_v10.map.centerMap
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.MovementType
 import kotlinx.coroutines.Job
@@ -40,13 +41,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // HOME PAGE
     val routeRecorder = RouteRecorder()
     var isReplayingRoute by mutableStateOf(false)
-    
-    val pathStorage = PathStorage()
+
     var sharedMapView by mutableStateOf<MapView?>(null)
+    var rawGpsPointsLayer: RawGpsPointsLayer? = null
+
+    val pathStorage = PathStorage()
     val pathOverlayLayer = PathOverlayLayer(pathStorage).also {
         pathStorage.onChainRemoved = { id -> it.evictFromCache(id) }
     }
-    var rawGpsPointsLayer: RawGpsPointsLayer? = null
+
+    val replayStorage = PathStorage()
+    val replayOverlayLayer = PathOverlayLayer(replayStorage).also {
+        replayStorage.onChainRemoved = { id -> it.evictFromCache(id) }
+    }
 
     var allPaths by mutableStateOf<List<Path>>(emptyList())
     var mapFilePath by mutableStateOf<String?>(null)
@@ -60,7 +67,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     var longPressedRecording: String? by mutableStateOf(null)
     private var replayJob: Job? = null
-    var selectedRecording: String? by mutableStateOf(null);
+    var selectedRecording: String? by mutableStateOf(null)
+
 
     var savedRoutes = mutableStateListOf<String>()
 
@@ -91,8 +99,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         set(value) {
             _showPathColorChoice = value
             prefs.edit().putBoolean("showPathColorChoice", value).apply()
+
             pathOverlayLayer.useCustomColors = value
             pathOverlayLayer.clearPaintCache()
+
+            replayOverlayLayer.useCustomColors = value
+            replayOverlayLayer.clearPaintCache()
             sharedMapView?.layerManager?.redrawLayers()
         }
 
@@ -110,6 +122,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         editor.apply()
         pathOverlayLayer.clearPaintCache()
+        replayOverlayLayer.clearPaintCache()
         sharedMapView?.layerManager?.redrawLayers()
     }
 
@@ -141,9 +154,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         refreshSavedRoutes()
 
-        /*PREFERENCES PAGE */
+        /* PREFERENCES PAGE */
         loadColorMap()
         pathOverlayLayer.useCustomColors = showPathColorChoice
+        replayOverlayLayer.useCustomColors = showPathColorChoice
     }
 
 
@@ -197,8 +211,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             var wasDrawing = false
             TrackingLiveState.isDrawing.collect { drawing ->
                 if (wasDrawing && !drawing) {
-                    //AppRouteRecorder.instance?.stopAndSave(getApplication())
-
                     withContext(Dispatchers.Default) {
                         pathStorage.finalizeSession()
                         pathStorage.mergeChainsByType()
@@ -248,13 +260,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         If the user selects a specific path, this function loads and displays previously saved
         walked paths. Is not called for the current path.
         */
-        replayJob?.cancel()
         isReplayingRoute = true
         selectedRecording = fileName
+        replayJob?.cancel()
+        if (selectedRecording == null) pathOverlayLayer.isDisplayed = true
 
         replayJob = viewModelScope.launch(Dispatchers.Default) {
-            pathStorage.isReplaying = true
-            pathStorage.clearSegments()
+            //pathStorage.isReplaying = true
+            withContext(Dispatchers.Main) {
+                pathOverlayLayer.isDisplayed = false
+                sharedMapView?.layerManager?.redrawLayers()
+            }
+
+            replayStorage.clearSegments()
             routeRecorder.loadForDisplay(context, fileName)
 
             var lastLat: Double? = null
@@ -298,30 +316,32 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 lastMovementType = movementType
 
                 val index = AppSegmentIndex.instance ?: return@loadAndReplay
-                pathStorage.onGpsPoint(LatLong(lat, lon), movementType, index, isReplayPoint = true)
+                replayStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
             }
 
             ensureActive()
-            pathStorage.finalizeSession()
-            pathStorage.mergeChainsByType()
+            replayStorage.finalizeSession()
+            replayStorage.mergeChainsByType()
             preProjectAllZoomLevels()
             withContext(Dispatchers.Main) {
                 sharedMapView?.layerManager?.redrawLayers()
                 isReplayingRoute = false
             }
-
-            //pathStorage.restoreSnapshot(snapshot)
+            /*
             pathStorage.isReplaying = false
             withContext(Dispatchers.IO) {
                 pathStorage.load(getApplication())
             }
+
             AppSegmentIndex.instance?.let { index ->
                 pathStorage.flushBufferedPoints(index)
             }
             preProjectAllZoomLevels()
             withContext(Dispatchers.Main) {
                 sharedMapView?.layerManager?.redrawLayers()
+                isReplayingRoute = false
             }
+             */
         }
     }
 
@@ -353,6 +373,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         withContext(Dispatchers.Default) {
             val zoomLevel = sharedMapView?.model?.mapViewPosition?.zoomLevel ?: 15
             pathOverlayLayer.preProjectAll(pathStorage.chains, zoomLevel)
+            replayOverlayLayer.preProjectAll(replayStorage.chains, zoomLevel)
         }
     }
 }

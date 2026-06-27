@@ -1,5 +1,6 @@
 package com.example.stepmap_v10.chains
 
+import com.example.stepmap_v10.hiddenMovementTypes
 import com.example.stepmap_v10.paths.colorForMovementType
 import com.example.stepmap_v10.paths.strokeWidthComputer
 import com.example.stepmap_v10.tracking.MovementType
@@ -18,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 /* OVERLAY LAYER */
 
 class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
+    var isDisplayed: Boolean = true
     private val paintCache = HashMap<Pair<MovementType, Byte>, Paint>()
     private val projectionCache =
         ConcurrentHashMap<Long, HashMap<Byte, List<Pair<Double, Double>>>>()
@@ -32,11 +34,15 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
         topLeftPoint: Point,
         rotation: Rotation
     ) {
+        if (!isDisplayed) return
+
         val dm = displayModel ?: return
         val w = canvas.width.toDouble()
         val h = canvas.height.toDouble()
 
         for (movementType in DRAW_ORDER) {
+            if(movementType in hiddenMovementTypes) continue
+
             val chains = synchronized(pathStorage) {
                 pathStorage.chains[movementType]?.toList()
             } ?: continue

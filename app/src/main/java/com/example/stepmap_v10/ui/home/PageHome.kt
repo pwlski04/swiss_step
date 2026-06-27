@@ -1,14 +1,13 @@
 package com.example.stepmap_v10.ui.home
 
 import android.content.Context
-import android.util.Log
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.material3.ripple
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.indication
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -27,31 +26,42 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.stepmap_v10.accentColor1
 import com.example.stepmap_v10.accentColor2
+import com.example.stepmap_v10.accentColor1_bg
+import com.example.stepmap_v10.text_accentColor1
 import com.example.stepmap_v10.accentColor3
 import com.example.stepmap_v10.map.LocationMarkerOverlay
 import com.example.stepmap_v10.map.centerMap
+import com.example.stepmap_v10.text_contrast
+import com.example.stepmap_v10.text_main
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -65,7 +75,6 @@ import java.io.File
 TODO:
 - experience
     - save paths under a name when resetting to reuse later
-    - improve map boundaries
     - more cities
  */
 
@@ -73,18 +82,11 @@ TODO:
 fun Page_Home(context: Context, viewModel: HomeViewModel) {
     val state = RememberHomeState(context, viewModel)
 
-    val scope = rememberCoroutineScope()
-    var currentJob by remember { mutableStateOf<Job?>(null) }
-    var zoomInJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var zoomOutJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-
-    val interactionSource_zoomIn = remember { MutableInteractionSource() }
-    val interactionSource_zoomOut = remember { MutableInteractionSource() }
-    val isPressed by interactionSource_zoomIn.collectIsPressedAsState()
-
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     with(state) { // To not have to write state.xyz everywhere
+        val isPressed by interactionSource_zoomIn.collectIsPressedAsState()
+
         HomeEffects(
             context = context,
             lifecycleOwner = state.lifecycleOwner,
@@ -93,15 +95,14 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             viewModel = viewModel,
 
             pathOverlayLayer = viewModel.pathOverlayLayer,
-
             isDrawing = isDrawing,
+
+            latestLivePoint = latestLivePoint,
+            isFollowingLocation = isFollowingLocation,
 
             permissionLauncher = permissionLauncher,
             hasLocationPermission = hasLocationPermission,
-            onLocationPermissionChange = { granted -> hasLocationPermission = granted },
-
-            zoomInJob = zoomInJob,
-            zoomOutJob = zoomOutJob
+            onLocationPermissionChange = { granted -> hasLocationPermission = granted }
         )
 
         /* FRONTEND */
@@ -139,67 +140,110 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                         }
                     )
 
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = accentColor1,
-                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
                     ) {
-                        Text(
-                            text = "ZOOM: " + viewModel.sharedMapView?.model?.mapViewPosition?.zoomLevel?.toString(),
-                            modifier = Modifier.width(160.dp).padding(top = 16.dp, bottom = 16.dp),
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                        // Bar — fills status bar area only, notch hangs below it
+                        Box(modifier = Modifier.fillMaxWidth().background(accentColor1_bg)) {
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .windowInsetsTopHeight(WindowInsets.statusBars)
+                            )
+                        }
 
-
-                    Column(modifier = Modifier.align(Alignment.TopEnd).padding(horizontal = 12.dp)) {
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        // BUTTON: START/STOP TRACKING
-                        ShadowedButton(content = {
-                            Surface(
-                                onClick = {
-                                    if (!isDrawing) {
-                                        viewModel.routeRecorder.startRecording()
-                                        isDrawing = true
-                                        Log.d("StepByStep_v1.0_TAG", "Drawing started")
-                                    } else {
-                                        isDrawing = false
-                                        Log.d("StepByStep_v1.0_TAG", "Drawing stopped")
-                                    }
-                                },
-                                shape = RoundedCornerShape(18.dp),
-                                color = accentColor2,
-                                modifier = Modifier.padding(4.dp)
+                        Box(modifier = Modifier.fillMaxWidth()){
+                            // Row with notch and button, sitting below the bar
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(
-                                    imageVector = if (isDrawing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                    contentDescription = if (isDrawing) "Stop tracking" else "Start tracking",
-                                    modifier = Modifier.padding(14.dp)
-                                )
-                            }
-                        })
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        if (!isDrawing && viewModel.hasChainsToDisplay) {
-
-                            //BUTTON: REMOVE HISTORY
-                            ShadowedButton(content = {
-                                Surface(
-                                    onClick = { showDeleteDialog = true },
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = accentColor2,
-                                    modifier = Modifier.padding(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.DeleteOutline,
-                                        contentDescription = "Remove history",
-                                        modifier = Modifier.padding(14.dp)
-                                    )
+                                Surface(shape = RoundedCornerShape(bottomEnd = 18.dp), color = accentColor1_bg, modifier = Modifier.weight(1f)) {
+                                    /*Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)) {
+                                        Text(text = "Zürich", fontSize = 16.sp, textAlign = TextAlign.Center, color = text_contrast)
+                                    }*/
+                                    //Spacer(modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp))
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Map,
+                                            contentDescription = null,
+                                            tint = text_contrast,
+                                            modifier = Modifier
+                                                .align(Alignment.CenterStart)
+                                                .padding(start = 30.dp)  // mirrors the ~18dp the button has from its edge
+                                                .size(24.dp)
+                                        )
+                                    }
                                 }
-                            })
-                            Spacer(modifier = Modifier.height(8.dp))
+
+                                InverseCornerBox(color = accentColor1_bg, cornerRadius = 12.dp, isLeft = false, modifier = Modifier.size(12.dp))
+
+                                Column{
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    // BUTTON: START/STOP TRACKING
+                                    ShadowedButton(content = {
+                                        if(isDrawing){
+                                            Surface(
+                                                onClick = { isDrawing = false },
+                                                shape = RoundedCornerShape(18.dp), color = accentColor2,
+                                                modifier = Modifier.padding(4.dp).border(width = 1.dp, color = text_accentColor1, shape = RoundedCornerShape(18.dp))
+                                            ){
+                                                Icon(
+                                                    imageVector = Icons.Filled.Pause,
+                                                    contentDescription = null, modifier = Modifier.padding(14.dp), tint = text_accentColor1
+                                                )
+                                            }
+                                        } else {
+                                            Surface(
+                                                onClick = { viewModel.routeRecorder.startRecording(); isDrawing = true },
+                                                shape = RoundedCornerShape(18.dp), color = text_accentColor1, modifier = Modifier.padding(4.dp)
+                                            ){
+                                                Icon(
+                                                    imageVector =  Icons.Filled.PlayArrow,
+                                                    contentDescription = null, modifier = Modifier.padding(14.dp), tint = text_contrast
+                                                )
+                                            }
+                                        }
+                                    })
+
+                                    //Spacer(modifier = Modifier.height(4.dp))
+
+                                    if (!isDrawing && viewModel.hasChainsToDisplay) {
+
+                                        //BUTTON: REMOVE HISTORY
+                                        ShadowedButton(content = {
+                                            Surface(onClick = { showDeleteDialog = true }, shape = RoundedCornerShape(18.dp),
+                                                color = accentColor1_bg, modifier = Modifier.padding(4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.DeleteOutline, contentDescription = "Remove history",
+                                                    modifier = Modifier.padding(14.dp), tint = text_contrast
+                                                )
+                                            }
+                                        })
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+                            }
+
+                            Text(
+                                text = "Zürich",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 18.sp,
+                                textAlign = TextAlign.Center,
+                                color = text_contrast,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 60.dp)
+                                    .wrapContentHeight(Alignment.CenterVertically)
+                            )
                         }
                     }
 
@@ -220,15 +264,14 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
                                                 withContext(Dispatchers.Main) {
                                                     val wasSelected = viewModel.selectedRecording == fileName
-                                                    // Clear previous route
-                                                    state.pathStorage.clearSegments()
+
+                                                    viewModel.replayStorage.clearSegments()
                                                     viewModel.routeRecorder.displayPoints.clear()
-                                                    viewModel.deleteSavedChains()
                                                     viewModel.selectedRecording = null
                                                     viewModel.sharedMapView?.layerManager?.redrawLayers()
+                                                    pathOverlayLayer.isDisplayed = true
 
-                                                    // Load new route
-                                                    if(!wasSelected){
+                                                    if (!wasSelected) {
                                                         viewModel.routeRecorder.loadForDisplay(context, fileName)
                                                         viewModel.replayRoute(context, fileName)
                                                     }
@@ -239,10 +282,12 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                             viewModel.longPressedRecording = fileName
                                         }
                                     )
+                                    .border(width = 1.dp, color = text_accentColor1, shape = RoundedCornerShape(18.dp))
                             ) {
                                 Text(
                                     text = fileName.removePrefix("route_").removeSuffix(".json"),
                                     fontSize = 12.sp,
+                                    color = text_accentColor1,
                                     modifier = Modifier.padding(vertical = 8.dp, horizontal = 14.dp)
                                 )
                             }
@@ -256,19 +301,24 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                         // BUTTON: RECENTER MAP
                         ShadowedButton(content = {
                             Surface(
-                                color = if (isPressed) accentColor2.copy(alpha = 0.7f) else accentColor2,
+                                color = if (isPressed) accentColor2.copy(alpha = 0.7f) else if (isFollowingLocation) accentColor3 else accentColor2,
                                 modifier = Modifier.padding(4.dp).clip(shape=RoundedCornerShape(18.dp)).combinedClickable(
                                     onClick = {
                                         zoomInJob?.cancel()
                                         zoomOutJob?.cancel()
 
-                                        viewModel.sharedMapView.centerMap(point?.let { LatLong(it.lat, it.lon) } as LatLong)
+                                        val p = point ?: return@combinedClickable
+                                        viewModel.sharedMapView.centerMap(LatLong(p.lat, p.lon))
+                                    },
+                                    onDoubleClick = {
+                                        isFollowingLocation = !isFollowingLocation
                                     },
                                     onLongClick = {
                                         zoomInJob?.cancel()
                                         zoomOutJob?.cancel()
 
-                                        viewModel.sharedMapView.centerMap(point?.let { LatLong(it.lat, it.lon) } as LatLong)
+                                        val p = point ?: return@combinedClickable
+                                        viewModel.sharedMapView.centerMap(LatLong(p.lat, p.lon))
 
                                         viewModel.sharedMapView?.let { mv ->
                                             mv.model.mapViewPosition.zoomLevel = 18.toByte()
@@ -459,8 +509,8 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 }
 
 @Composable
-private fun ShadowedButton(content: @Composable ()->Unit){
-    Box {       //BUTTON
+private fun ShadowedButton(modifier: Modifier = Modifier, content: @Composable ()->Unit){
+    Box(modifier) {       //BUTTON
         Box(        // shadows
             modifier = Modifier
                 .matchParentSize()
@@ -596,5 +646,47 @@ private fun RouteRenameDialog(
                 }
             }
         }
+    }
+}
+
+
+@Composable
+fun InverseCornerBox(
+    color: Color,
+    cornerRadius: Dp,
+    modifier: Modifier = Modifier,
+    isLeft: Boolean = true
+) {
+    val radiusPx = with(LocalDensity.current) { cornerRadius.toPx() }
+    Canvas(modifier = modifier) {
+        val path = Path().apply {
+            if (isLeft) {
+                // Original flipped both vertically and horizontally
+                moveTo(size.width, size.height)
+                lineTo(0f, size.height)
+                lineTo(0f, radiusPx)
+                arcTo(
+                    rect = Rect(-radiusPx, 0f, radiusPx, radiusPx * 2),
+                    startAngleDegrees = 0f,
+                    sweepAngleDegrees = -90f,
+                    forceMoveTo = false
+                )
+                lineTo(size.width, 0f)
+            } else {
+                // Original flipped vertically only
+                moveTo(0f, size.height)
+                lineTo(size.width, size.height)
+                lineTo(size.width, radiusPx)
+                arcTo(
+                    rect = Rect(size.width - radiusPx, 0f, size.width + radiusPx, radiusPx * 2),
+                    startAngleDegrees = 180f,
+                    sweepAngleDegrees = 90f,
+                    forceMoveTo = false
+                )
+                lineTo(0f, 0f)
+            }
+            close()
+        }
+        drawPath(path, color = color)
     }
 }

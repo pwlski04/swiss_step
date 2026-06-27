@@ -1,13 +1,12 @@
 import json
 
 wanted = {
-    # walking (removed footways for leading to duplicates)
+    # walking:
     "path",
-    "pedestrian",
     "steps",
     "track",
 
-    # streets
+    # streets:
     "living_street",
     "residential",
     "service",
@@ -23,14 +22,13 @@ wanted = {
     "trunk",
     "trunk_link",
 
-    # tram tracks if mapped separately
+    # tram tracks if mapped separately:
     "tram",
 }
 
 walkable_streets = {
     "footway",
     "path",
-    "pedestrian",
     "steps",
     "track",
     "living_street",

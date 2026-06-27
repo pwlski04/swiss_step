@@ -24,9 +24,11 @@ import com.example.stepmap_v10.chains.PathOverlayLayer
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.TrackingLiveState
 import org.mapsforge.map.android.view.MapView
-import com.example.stepmap_v10.chains.RawGpsPointsLayer
+import com.example.stepmap_v10.map.RawGpsPointsLayer
+import com.example.stepmap_v10.map.centerMap
+import com.example.stepmap_v10.paths.PathPoint
 import com.example.stepmap_v10.tracking.loadTrackingSessionId
-import kotlinx.coroutines.Job
+import org.mapsforge.core.model.LatLong
 
 
 @Composable
@@ -42,18 +44,17 @@ fun HomeEffects(
     isDrawing: Boolean,
     showLocationPoints: Boolean = viewModel.showLocationPoints,
 
+    latestLivePoint: PathPoint?,
+    isFollowingLocation: Boolean,
+
     permissionLauncher: ManagedActivityResultLauncher<String, Boolean>,
     hasLocationPermission: Boolean,
     onLocationPermissionChange: (Boolean) -> Unit,
-
-    zoomInJob: Job?,
-    zoomOutJob: Job?
     ){
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* no action needed on result */ }
-    var lastKnownZoom by remember { mutableStateOf<Byte?>(null) }
-
+    var hasInitiallyCentered by remember { mutableStateOf(false) }
 
     LaunchedEffect(mapView) {
         val mv = mapView ?: return@LaunchedEffect
@@ -71,6 +72,9 @@ fun HomeEffects(
         val mv = mapView ?: return@LaunchedEffect
         if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
             mv.layerManager.layers.add(pathOverlayLayer)
+        }
+        if (!mv.layerManager.layers.contains(viewModel.replayOverlayLayer)) {
+            mv.layerManager.layers.add(viewModel.replayOverlayLayer)
         }
 
         // Pre-project
@@ -146,6 +150,21 @@ fun HomeEffects(
         TrackingLiveState.isDrawing.value = isDrawing
     }
 
+    LaunchedEffect(latestLivePoint, isFollowingLocation) {
+        if (!isFollowingLocation) return@LaunchedEffect
+        val point = latestLivePoint ?: return@LaunchedEffect
+        viewModel.sharedMapView.centerMap(LatLong(point.lat, point.lon))
+    }
+    LaunchedEffect(latestLivePoint) {
+        if (hasInitiallyCentered) return@LaunchedEffect
+        val mv = viewModel.sharedMapView ?: return@LaunchedEffect
+        val point = latestLivePoint ?: return@LaunchedEffect
+        mv.model.mapViewPosition.setCenter(LatLong(point.lat, point.lon))
+        hasInitiallyCentered = true
+    }
+    DisposableEffect(Unit) {
+        onDispose { hasInitiallyCentered = false }
+    }
 
     /* OTHER */
     DisposableEffect(lifecycleOwner) {
@@ -163,7 +182,7 @@ fun HomeEffects(
 
                 Lifecycle.Event.ON_STOP -> {
                     if(TrackingLiveState.isDrawing.value){
-                        LocationTrackingService.Companion.useBackgroundUpdates(context)
+                        LocationTrackingService.useBackgroundUpdates(context)
                         Log.d("StepByStep_v1.0_TAG", "Using background location updates")
                     } else {
                         LocationTrackingService.stop(context)

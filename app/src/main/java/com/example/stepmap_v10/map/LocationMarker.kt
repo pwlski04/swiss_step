@@ -26,8 +26,7 @@ import org.mapsforge.map.model.common.Observer
 @Composable
 fun LocationMarkerOverlay(
     mapView: MapView?,
-    position: LatLong?,
-    modifier: Modifier = Modifier
+    position: LatLong?
 ) {
     if (mapView == null || position == null) return
 

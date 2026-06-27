@@ -35,13 +35,11 @@ class PathStorage {
     private val BFS_SEARCH_DISTANCE = 0.005
 
     private val COMMIT_THRESHOLD = 2
+    private val pendingSpawn = HashMap<MovementType, Int>()
 
     var onChainRemoved: ((Long) -> Unit)? = null
     var onChainsChanged: (() -> Unit)? = null
     var lastActiveMovementType: MovementType = MovementType.TRANSPORT
-
-    var isReplaying = false
-    private val bufferedPoints = mutableListOf<Triple<LatLong, MovementType, Long>>()
 
     private val FILE_NAME = "walked_chains.json"
     private val json = Json { prettyPrint = false; ignoreUnknownKeys = true }
@@ -57,15 +55,14 @@ class PathStorage {
 
         val distToStart = gpsPoint.distanceTo(nearest.startingPoint)
         val distToEnd = gpsPoint.distanceTo(nearest.endingPoint)
-        val (first, second) = if (distToStart <= distToEnd)
-            Pair(nearest.startingPoint, nearest.endingPoint)
-        else
-            Pair(nearest.endingPoint, nearest.startingPoint)
+        val closestEndpoint =
+            if (distToStart <= distToEnd) nearest.startingPoint
+            else nearest.endingPoint
 
         val chain = PathChain(
             id = nextChainId++,
             movementType = movementType,
-            points = ArrayDeque(listOf(first, second)),
+            points = ArrayDeque(listOf(closestEndpoint)),
             dirty = true
         )
         chains[movementType]?.add(chain)
@@ -136,16 +133,11 @@ class PathStorage {
     }
 
     @Synchronized
-    fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex, isReplayPoint: Boolean = false) {
+    fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex) {
         if (movementType == MovementType.STILL) return
 
         lastActiveMovementType = movementType
         val now = System.currentTimeMillis()
-
-        if(isReplaying && !isReplayPoint){
-            bufferedPoints.add(Triple(gpsPoint, lastActiveMovementType, now))
-            return
-        }
 
         val bkps = backups.getOrPut(movementType) { mutableListOf() }
 
@@ -156,9 +148,15 @@ class PathStorage {
 
         val currentPrimary = primary[movementType]
         if (currentPrimary == null) {
-            spawnFreshPrimary(gpsPoint, movementType, index, now)
+            val count = (pendingSpawn[movementType] ?: 0) + 1
+            pendingSpawn[movementType] = count
+            if (count >= COMMIT_THRESHOLD) {
+                pendingSpawn.remove(movementType)
+                spawnFreshPrimary(gpsPoint, movementType, index, now)
+            }
             return
         }
+        pendingSpawn.remove(movementType)
 
         val parentMap = getReachableCached(currentPrimary, index)
 
@@ -327,9 +325,6 @@ class PathStorage {
         "service"                     -> 0.0005
         else                          -> 0.0001
     }
-
-    private fun LatLong.matchesEndpoint(other: LatLong): Boolean = distanceTo(other) < 0.00005
-
 
     /* ── Finalization ── */
 
@@ -531,16 +526,6 @@ class PathStorage {
         return null
     }
 
-    /* Snapshotting and restoring */
-    @Synchronized
-    fun flushBufferedPoints(index: SegmentIndex) {
-        val toProcess = bufferedPoints.toList()
-        bufferedPoints.clear()
-        for ((point, type, timestamp) in toProcess) {
-            onGpsPoint(point, type, index)
-        }
-    }
-
 
     /* ── Persistence ── */
 
@@ -610,14 +595,4 @@ fun LatLong.distanceTo(other: LatLong): Double {
     val dx = longitude - other.longitude
     val dy = latitude  - other.latitude
     return Math.sqrt(dx * dx + dy * dy)
-}
-
-fun ArrayDeque<LatLong>.indexOfClosestTo(target: LatLong): Int {
-    var bestIdx  = 0
-    var bestDist = Double.MAX_VALUE
-    forEachIndexed { i, p ->
-        val d = p.distanceTo(target)
-        if (d < bestDist) { bestDist = d; bestIdx = i }
-    }
-    return bestIdx
 }

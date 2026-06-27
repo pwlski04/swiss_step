@@ -2,7 +2,6 @@ package com.example.stepmap_v10.chains
 
 import android.content.Context
 import com.example.stepmap_v10.tracking.MovementType
-import com.example.stepmap_v10.ui.preferences.MovementColorDropdown
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -22,12 +21,15 @@ class RouteRecorder {
 
     fun startRecording() {
         recordedPoints.clear()
+        displayPoints.clear()
         isRecording = true
     }
 
     fun recordPoint(lat: Double, lon: Double, movementType: MovementType) {
         if (!isRecording || movementType == MovementType.STILL) return
-        recordedPoints.add(RecordedPoint(lat, lon, System.currentTimeMillis(), movementType))
+        val point = RecordedPoint(lat, lon, System.currentTimeMillis(), movementType)
+        recordedPoints.add(point)
+        displayPoints.add(point)
     }
 
     fun stopAndSave(context: Context): String {
@@ -84,7 +86,7 @@ class RouteRecorder {
     }
 }
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class RecordedPoint(
     val lat: Double,
     val lon: Double,
