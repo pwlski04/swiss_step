@@ -127,10 +127,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        val previousRecorder = AppRouteRecorder.instance
+        val previousStorage = AppPathStorage.instance
+
         /* Initial instances */
-        AppPathStorage.instance = pathStorage           // Storage
-        AppSegmentIndex.instance = null                 // Segments
-        AppRouteRecorder.instance = routeRecorder       // Path recording
+        AppPathStorage.instance = null
+        AppSegmentIndex.instance = null
+        AppRouteRecorder.instance = null        // held null until resume/start finishes below
 
         /* Are we drawing the chains? (e.g. for start/stop buttons) */
         val restoredIsDrawing = loadIsDrawing(getApplication()) && LocationTrackingService.isRunning
@@ -140,7 +143,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /* Chain existence check (link to chain operations, for current application) */
         pathStorage.onChainsChanged = { refreshHasChains() }
         viewModelScope.launch(Dispatchers.IO) {
+            // Flush any data the service accumulated in the old instances while the app was closed
+            previousStorage?.save(getApplication())
+            if (restoredIsDrawing) previousRecorder?.saveInProgress(getApplication())
+
             pathStorage.load(getApplication())
+            AppPathStorage.instance = pathStorage
+
+            if (restoredIsDrawing) {
+                if (!routeRecorder.resumeFromInProgress(getApplication())) {
+                    routeRecorder.startRecording()
+                }
+            }
+            AppRouteRecorder.instance = routeRecorder
+
             refreshHasChains()
         }
 
@@ -327,21 +343,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 sharedMapView?.layerManager?.redrawLayers()
                 isReplayingRoute = false
             }
-            /*
-            pathStorage.isReplaying = false
-            withContext(Dispatchers.IO) {
-                pathStorage.load(getApplication())
-            }
-
-            AppSegmentIndex.instance?.let { index ->
-                pathStorage.flushBufferedPoints(index)
-            }
-            preProjectAllZoomLevels()
-            withContext(Dispatchers.Main) {
-                sharedMapView?.layerManager?.redrawLayers()
-                isReplayingRoute = false
-            }
-             */
         }
     }
 

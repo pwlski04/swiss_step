@@ -46,9 +46,7 @@ fun strokeWidthComputer(zoom: Float): Float {
         18f -> 35f
         19f -> 50f
         20f -> 75f
-        else -> {
-            inputWidth
-        }
+        else -> { inputWidth }
     }
 }
 

@@ -16,10 +16,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import com.example.stepmap_v10.accentColor_main
 import com.example.stepmap_v10.chains.PathOverlayLayer
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.TrackingLiveState
@@ -61,6 +63,7 @@ fun HomeEffects(
 
         // Apply persisted showLocationPoints state on map ready
         if (viewModel.showLocationPoints && viewModel.rawGpsPointsLayer == null) {
+            viewModel.routeRecorder.syncDisplayPoints()
             val layer = RawGpsPointsLayer(viewModel.routeRecorder)
             viewModel.rawGpsPointsLayer = layer
             mv.layerManager.layers.add(layer)

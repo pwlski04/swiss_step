@@ -24,6 +24,7 @@ wanted = {
 
     # tram tracks if mapped separately:
     "tram",
+    "rail"
 }
 
 walkable_streets = {

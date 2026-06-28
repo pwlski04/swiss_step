@@ -14,6 +14,7 @@ object AppRouteRecorder {
 
 class RouteRecorder {
     private val recordedPoints = mutableListOf<RecordedPoint>()
+    private val IN_PROGRESS_FILE = "route_inprogress.json"
     val points: List<RecordedPoint> get() = recordedPoints.toList()
     val displayPoints = mutableListOf<RecordedPoint>()
     var isRecording = false
@@ -32,21 +33,49 @@ class RouteRecorder {
         displayPoints.add(point)
     }
 
-    fun stopAndSave(context: Context): String {
+    fun stopAndSave(context: Context, newName: String = ""): String {
         isRecording = false
         displayPoints.clear()
         displayPoints.addAll(recordedPoints)
-        val fileName = "route_${System.currentTimeMillis()}.json"
+        val fileName = if (newName.length < 3) "route_${System.currentTimeMillis()}.json" else "route_${newName}.json"
         val json = Json { prettyPrint = false }
         val text = json.encodeToString(RecordedRoute.serializer(), RecordedRoute(recordedPoints.toList()))
         File(context.filesDir, fileName).writeText(text)
         recordedPoints.clear()
+        File(context.filesDir, IN_PROGRESS_FILE).delete()
         return fileName
+    }
+
+    fun saveInProgress(context: Context) {
+        val json = Json { prettyPrint = false }
+        val text = json.encodeToString(RecordedRoute.serializer(), RecordedRoute(recordedPoints.toList()))
+        File(context.filesDir, IN_PROGRESS_FILE).writeText(text)
+    }
+
+    fun resumeFromInProgress(context: Context): Boolean {
+        val file = File(context.filesDir, IN_PROGRESS_FILE)
+        if (!file.exists()) return false
+        return try {
+            val json = Json { ignoreUnknownKeys = true }
+            val route = json.decodeFromString<RecordedRoute>(file.readText())
+            recordedPoints.clear()
+            recordedPoints.addAll(route.points)
+            displayPoints.clear()
+            displayPoints.addAll(route.points)
+            isRecording = true
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun clearInProgress(context: Context) {
+        File(context.filesDir, IN_PROGRESS_FILE).delete()
     }
 
     fun listSavedRoutes(context: Context): List<String> {
         return context.filesDir.listFiles()
-            ?.filter { it.name.startsWith("route_") && it.name.endsWith(".json") }
+            ?.filter { it.name.startsWith("route_") && it.name.endsWith(".json") && it.name != IN_PROGRESS_FILE }
             ?.map { it.name }
             ?: emptyList()
     }
@@ -63,6 +92,11 @@ class RouteRecorder {
         return route.points.size
     }
 
+    fun syncDisplayPoints() {
+        displayPoints.clear()
+        displayPoints.addAll(recordedPoints)
+    }
+
     fun loadForDisplay(context: Context, fileName: String) {
         val json = Json { ignoreUnknownKeys = true }
         val route = json.decodeFromString<RecordedRoute>(File(context.filesDir, fileName).readText())
@@ -73,7 +107,7 @@ class RouteRecorder {
     fun cleanStillPointsFromSavedRoutes(context: Context) {
         val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
         context.filesDir.listFiles()
-            ?.filter { it.name.startsWith("route_") && it.name.endsWith(".json") }
+            ?.filter { it.name.startsWith("route_") && it.name.endsWith(".json") && it.name != IN_PROGRESS_FILE }
             ?.forEach { file ->
                 try {
                     val route = json.decodeFromString<RecordedRoute>(file.readText())
