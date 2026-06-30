@@ -31,7 +31,6 @@ import org.mapsforge.core.model.LatLong
 import com.example.stepmap_v10.chains.PathStorage
 import com.example.stepmap_v10.paths.SegmentIndex
 import com.example.stepmap_v10.chains.AppRouteRecorder
-import com.example.stepmap_v10.chains.RecordedPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -55,31 +54,89 @@ class LocationTrackingService: Service() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
 
+    private var pointsSinceLastSave = 0
+    private val SAVE_INTERVAL = 10      // every ca. 50s in background, every ca. 10s in foreground
+
+    private var lastNotifiedMovementType: MovementType? = null
+    private var lastNotifiedIsDrawing: Boolean? = null
+    private var locationUpdatesStarted = false
+
     /* Notification */
-    private fun showForegroundNotification() {
+    private fun showTrackingNotification(movementType: MovementType) {
+        if (movementType == lastNotifiedMovementType && lastNotifiedIsDrawing == true) return
+        lastNotifiedMovementType = movementType
+        lastNotifiedIsDrawing = true
+        val movementText = when (movementType) {
+            MovementType.WALKING -> "walking"
+            MovementType.RUNNING -> "running"
+            MovementType.BIKING -> "biking"
+            MovementType.TRANSPORT -> "using transport"
+            MovementType.STILL -> "still"
+        }
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Tracking active")
+            .setContentText("Recording your route. Currently "+ movementText+".")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setOngoing(true)
+            .setSilent(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setContentIntent(pendingIntent())
+            .build()
+
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun showIdleNotification() {
+        if (lastNotifiedIsDrawing == false) return
+        lastNotifiedIsDrawing = false
+        lastNotifiedMovementType = null
+        // Minimal silent notification required to keep foreground service alive
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("step by step – location active")
+            .setSmallIcon(android.R.drawable.ic_dialog_map)
+            .setSilent(true)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)  // hidden from lock screen
+            .setContentIntent(pendingIntent())
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
+            .build()
+
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun pendingIntent(): PendingIntent? {
         val openAppIntent = packageManager
             .getLaunchIntentForPackage(packageName)
             ?.apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
-
-        val pendingIntent = openAppIntent?.let {
+        return openAppIntent?.let {
             PendingIntent.getActivity(
                 this, 0, it,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }
+    }
+
+    private fun showForegroundNotification() {
+        createNotificationChannel()
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Tracking active")
-            .setContentText("Recording your walking route.")
+            .setContentTitle("step by step")
+            .setContentText("Location active.")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSilent(true)
             .setOngoing(true)
-            .setContentIntent(pendingIntent)
+            .setAutoCancel(false)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setContentIntent(pendingIntent())
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
+            startForeground(NOTIFICATION_ID, notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             )
         } else {
@@ -92,14 +149,30 @@ class LocationTrackingService: Service() {
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        createNotificationChannel()
-
         isRunning = true
+
+        // Switch from idle to full foreground request (or back) when drawing state changes
+        serviceScope.launch {
+            TrackingLiveState.isDrawing.collect {
+                if (locationUpdatesStarted && useForegroundUpdates) restartLocationUpdates()
+            }
+        }
     }
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         showForegroundNotification()
+
+        // Handle restart with null intent
+        if (intent == null) {
+            // Restarted by system after being killed — resume tracking if was drawing
+            if (TrackingLiveState.isDrawing.value) {
+                useForegroundUpdates = false  // background mode since app isn't open
+                startLocationUpdates()
+            }
+            return START_STICKY
+        }
+        //sessionId = intent.getLongExtra(EXTRA_SESSION_ID, loadTrackingSessionId(this))
 
         sessionId = intent?.getLongExtra(EXTRA_SESSION_ID, loadTrackingSessionId(this))
             ?: loadTrackingSessionId(this)
@@ -143,7 +216,12 @@ class LocationTrackingService: Service() {
         super.onTaskRemoved(rootIntent)
         serviceScope.launch(Dispatchers.IO) {
             AppPathStorage.instance?.save(applicationContext)
+            if (TrackingLiveState.isDrawing.value) {
+                AppRouteRecorder.instance?.saveInProgress(applicationContext)
+            }
         }
+
+        if(!TrackingLiveState.isDrawing.value) stopSelf()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -155,16 +233,26 @@ class LocationTrackingService: Service() {
         1000L
     )
         .setMinUpdateIntervalMillis(500L)
-        .setMinUpdateDistanceMeters(0f)
+        .setMinUpdateDistanceMeters(2f)
         .setWaitForAccurateLocation(false)
         .build()
 
     private val backgroundRequest = LocationRequest.Builder(
-        Priority.PRIORITY_HIGH_ACCURACY, //.PRIORITY_BALANCED_POWER_ACCURACY,
+        Priority.PRIORITY_HIGH_ACCURACY,
         5000L
     )
         .setMinUpdateIntervalMillis(3000L)
-        .setMinUpdateDistanceMeters(0f)
+        .setMinUpdateDistanceMeters(2f)
+        .setWaitForAccurateLocation(false)
+        .build()
+
+    // Used when the app is open but not drawing — just enough to show the location dot
+    private val idleRequest = LocationRequest.Builder(
+        Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+        8000L
+    )
+        .setMinUpdateIntervalMillis(5000L)
+        .setMinUpdateDistanceMeters(10f)
         .setWaitForAccurateLocation(false)
         .build()
 
@@ -185,11 +273,7 @@ class LocationTrackingService: Service() {
 
     /* Main location handling */
     private fun handleLocation(location: Location) {
-        Log.d("StepByStep_v1.0_TAG", "handleLocation entered")
         val movementType = movementClassifier.classify(location)
-
-        /* TAG REMOVE (RECORDER): this line */
-        AppRouteRecorder.instance?.recordPoint(location.latitude, location.longitude, movementType)
 
         val point = PathPoint(
             location.latitude,
@@ -204,15 +288,12 @@ class LocationTrackingService: Service() {
 
         // Record into PathStorage (works whether app is open or closed)
         if (TrackingLiveState.isDrawing.value) {
-            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 1")
+            showTrackingNotification(movementType)
             val storage = AppPathStorage.instance ?: return
-            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 2")
             val index   = AppSegmentIndex.instance ?: return
-            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 3")
 
             val nearest = findNearestSegment(location.latitude, location.longitude, index)
                 ?: return
-            Log.d("StepByStep_v1.0_TAG", "handleLocation checkpoint 4")
             val dist = pointToSegmentDistance(
                 LatLong(location.latitude, location.longitude), nearest
             )
@@ -225,13 +306,25 @@ class LocationTrackingService: Service() {
                     storage.lastActiveMovementType
                 }
                 AppRouteRecorder.instance?.recordPoint(location.latitude, location.longitude, movementType)
-                storage.onGpsPoint(LatLong(location.latitude, location.longitude), effectiveType, index)
+                storage.onGpsPoint(
+                    LatLong(location.latitude, location.longitude),
+                    effectiveType,
+                    index
+                )
             }
+        } else {
+            showIdleNotification()
         }
 
-        Log.d("StepByStep_v1.0_TAG",
-            "Location: ${location.latitude}, ${location.longitude}, " +
-                    "movement=$movementType, drawing=${TrackingLiveState.isDrawing.value}")
+        if (TrackingLiveState.isDrawing.value) {
+            pointsSinceLastSave++
+            if (pointsSinceLastSave >= SAVE_INTERVAL) {
+                pointsSinceLastSave = 0
+                serviceScope.launch(Dispatchers.IO) {
+                    AppPathStorage.instance?.save(applicationContext)
+                }
+            }
+        }
     }
 
 
@@ -270,10 +363,10 @@ class LocationTrackingService: Service() {
             return
         }
 
-        val activeRequest = if (useForegroundUpdates) {
-            foregroundRequest
-        } else {
-            backgroundRequest
+        val activeRequest = when {
+            !useForegroundUpdates -> backgroundRequest
+            TrackingLiveState.isDrawing.value -> foregroundRequest
+            else -> idleRequest
         }
 
         fusedLocationClient.requestLocationUpdates(
@@ -282,6 +375,7 @@ class LocationTrackingService: Service() {
             Looper.getMainLooper()
         )
 
+        locationUpdatesStarted = true
         Log.d("StepByStep_v1.0_TAG", "requestLocationUpdates called")
     }
 
@@ -292,6 +386,7 @@ class LocationTrackingService: Service() {
 
     private fun stopLocationUpdates() {
         fusedLocationClient.removeLocationUpdates(callback)
+        locationUpdatesStarted = false
     }
 
 
@@ -302,7 +397,7 @@ class LocationTrackingService: Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Location tracking",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_MIN
         )
 
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -332,6 +427,13 @@ class LocationTrackingService: Service() {
 
             val intent = Intent(context, LocationTrackingService::class.java)
             context.stopService(intent)
+        }
+
+        fun restartForForeground(context: Context, sessionId: Long) {
+            // Use regular startService (not startForegroundService) to avoid the 5-second startForeground requirement during app resume
+            val intent = Intent(context, LocationTrackingService::class.java)
+                .putExtra(EXTRA_SESSION_ID, sessionId)
+            context.startService(intent)
         }
 
         fun useForegroundUpdates(context: Context) {

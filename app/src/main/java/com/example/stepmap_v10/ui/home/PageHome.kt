@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.mapsforge.map.android.view.MapView
@@ -40,12 +41,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -74,6 +78,7 @@ import kotlinx.coroutines.withContext
 
 import org.mapsforge.core.model.LatLong
 import java.io.File
+import com.example.stepmap_v10.R
 
 
 /*
@@ -99,6 +104,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
     val accentColorMainReplayBasedSubtle by remember {
         derivedStateOf { accentColorMainReplayBased.copy(144f/255f) }
     }
+    val routeProgress by viewModel.replayProgress.collectAsState()
 
     with(state) { // To not have to write state.xyz everywhere
         val isPressed by interactionSource_zoomIn.collectIsPressedAsState()
@@ -181,8 +187,8 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                     Box(
                                         modifier = Modifier.heightIn(min = 60.dp), contentAlignment = Alignment.CenterStart
                                     ) {
-                                        Text(text="[swst]", fontWeight = FontWeight.ExtraLight, fontFamily = FontFamily.SansSerif, fontSize = 20.sp,
-                                            color= text_contrast, modifier = Modifier.padding(start = 20.dp))
+                                        Icon(painter = painterResource(R.drawable.app_icon_outline), contentDescription = "SwissStep icon",
+                                            Modifier.padding(start = 28.dp).size(40.dp), tint = Color.Unspecified)
                                     }
                                 }
 
@@ -256,33 +262,34 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                     // BUTTONS: Available routes
                     Row(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp, horizontal = 8.dp)){
                         viewModel.savedRoutes.forEach { fileName ->
-                            Surface(
-                                color = if(viewModel.selectedRecording == fileName) accentColorMainReplayBased else gray_pale_subtle,
-                                modifier = Modifier.padding(6.dp)
+                            val isSelectedRoute = viewModel.selectedRecording == fileName
+                            val isLoadingThisRoute = viewModel.isReplayingRoute && isSelectedRoute
+
+                            Box(
+                                modifier = Modifier
+                                    .padding(6.dp)
                                     .clip(RoundedCornerShape(18.dp))
-                                    .background(if(viewModel.selectedRecording == fileName) gray_light_subtle else Color.Transparent)
+                                    .drawBehind {
+                                        drawRect(gray_pale_subtle)
+                                        when {
+                                            isLoadingThisRoute -> drawRect(
+                                                color = accentColorMainReplayBased,
+                                                size = Size(size.width * routeProgress, size.height)
+                                            )
+                                            isSelectedRoute -> drawRect(accentColorMainReplayBased)
+                                        }
+                                    }
                                     .combinedClickable(
                                         onClick = {
                                             currentJob?.cancel()
                                             currentJob = scope.launch {
-                                                delay(150) // Ignore quick taps
+                                                delay(150)
                                                 if (!isActive) return@launch
-
                                                 withContext(Dispatchers.Main) {
-                                                    val wasSelected = viewModel.selectedRecording == fileName
-
-                                                    viewModel.replayStorage.clearSegments()
-                                                    if(wasSelected){
+                                                    if (viewModel.selectedRecording == fileName) {
+                                                        viewModel.stopReplay()
                                                         viewModel.routeRecorder.syncDisplayPoints()
-                                                        viewModel.selectedRecording = null
-                                                        viewModel.sharedMapView?.layerManager?.redrawLayers()
-                                                        pathOverlayLayer.isDisplayed = true
                                                     } else {
-                                                        viewModel.routeRecorder.displayPoints.clear()
-                                                        viewModel.selectedRecording = null
-                                                        viewModel.sharedMapView?.layerManager?.redrawLayers()
-                                                        pathOverlayLayer.isDisplayed = true
-                                                        viewModel.routeRecorder.loadForDisplay(context, fileName)
                                                         viewModel.replayRoute(context, fileName)
                                                     }
                                                 }
@@ -297,7 +304,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 Text(
                                     text = fileName.removePrefix("route_").removeSuffix(".json"),
                                     fontSize = 12.sp,
-                                    color = if(viewModel.selectedRecording == fileName) text_contrast else accentColorMainReplayBased,
+                                    color = if (isSelectedRoute && !isLoadingThisRoute) text_contrast else accentColorMainReplayBased,
                                     modifier = Modifier.padding(vertical = 8.dp, horizontal = 14.dp)
                                 )
                             }
@@ -740,7 +747,7 @@ private fun RouteRenameDialog(
 /* AESTHETIC COMPONENTS */
 
 @Composable
-private fun ShadowedButton(modifier: Modifier = Modifier, content: @Composable ()->Unit){
+fun ShadowedButton(modifier: Modifier = Modifier, content: @Composable ()->Unit){
     Box(modifier) {       //BUTTON
         Box(        // shadows
             modifier = Modifier

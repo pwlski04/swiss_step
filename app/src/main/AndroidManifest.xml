@@ -21,7 +21,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/app_icon"
-        android:label="step by step"
+        android:label="Swiss Step"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.StepByStep_v10">
@@ -40,7 +40,8 @@
         <service
             android:name=".tracking.LocationTrackingService"
             android:exported="false"
-            android:foregroundServiceType="location" />
+            android:foregroundServiceType="location"
+            android:stopWithTask="false"/>
     </application>
 
 </manifest>

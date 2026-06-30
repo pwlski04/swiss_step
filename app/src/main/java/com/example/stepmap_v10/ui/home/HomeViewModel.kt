@@ -27,11 +27,11 @@ import com.example.stepmap_v10.chains.AppRouteRecorder
 import com.example.stepmap_v10.map.RawGpsPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
 import com.example.stepmap_v10.colorMap
-import com.example.stepmap_v10.map.centerMap
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.MovementType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.mapsforge.core.model.LatLong
 
@@ -68,6 +68,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     var longPressedRecording: String? by mutableStateOf(null)
     private var replayJob: Job? = null
     var selectedRecording: String? by mutableStateOf(null)
+    val replayProgress = MutableStateFlow(0f)
 
 
     var savedRoutes = mutableStateListOf<String>()
@@ -271,6 +272,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun stopReplay() {
+        isReplayingRoute = false
+        selectedRecording = null
+        replayProgress.value = 0f
+        pathOverlayLayer.isDisplayed = true
+        val previousJob = replayJob
+        replayJob = null
+        viewModelScope.launch(Dispatchers.Default) {
+            previousJob?.cancel()
+            previousJob?.join()
+            replayStorage.clearSegments()
+            withContext(Dispatchers.Main) {
+                sharedMapView?.layerManager?.redrawLayers()
+            }
+        }
+    }
+
     fun replayRoute(context: Context, fileName: String) {
         /*
         If the user selects a specific path, this function loads and displays previously saved
@@ -278,11 +296,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         */
         isReplayingRoute = true
         selectedRecording = fileName
-        replayJob?.cancel()
-        if (selectedRecording == null) pathOverlayLayer.isDisplayed = true
+        replayProgress.value = 0f
+
+        val previousJob = replayJob
+        previousJob?.cancel()
 
         replayJob = viewModelScope.launch(Dispatchers.Default) {
-            //pathStorage.isReplaying = true
+            // Wait for any previous replay to fully stop before touching shared state
+            previousJob?.join()
+
             withContext(Dispatchers.Main) {
                 pathOverlayLayer.isDisplayed = false
                 sharedMapView?.layerManager?.redrawLayers()
@@ -291,14 +313,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             replayStorage.clearSegments()
             routeRecorder.loadForDisplay(context, fileName)
 
+            val allPoints = routeRecorder.displayPoints.toList()
+            val totalPoints = allPoints.size.coerceAtLeast(1)
+            var processed = 0
+            var lastReportedPercent = -1
+
             var lastLat: Double? = null
             var lastLon: Double? = null
             var lastTimestamp: Long? = null
             var lastMovementType: MovementType? = null
             var lastBearing: Double? = null
 
-            routeRecorder.loadAndReplay(context, fileName) { lat, lon, movementType, timestamp ->
+            for (pt in allPoints) {
                 ensureActive()
+
+                processed++
+                val percent = processed * 100 / totalPoints
+                if (percent != lastReportedPercent) {
+                    lastReportedPercent = percent
+                    replayProgress.value = processed.toFloat() / totalPoints
+                }
+
+                val lat = pt.lat; val lon = pt.lon
+                val movementType = pt.movementType; val timestamp = pt.timestamp
 
                 val pLat = lastLat; val pLon = lastLon; val pTime = lastTimestamp
 
@@ -308,10 +345,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
                     val timeDiff = timestamp - pTime
 
-                    // Never skip if movement type changed — transitions matter
                     val typeChanged = movementType != lastMovementType
 
-                    // Never skip if direction changed meaningfully — turns matter
                     val bearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
                     val bearingChanged = lastBearing != null &&
                             Math.abs(((bearing - lastBearing!! + 540) % 360) - 180) > 25.0
@@ -319,20 +354,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     shouldSkip = distMeters < 4.0 && timeDiff < 4000 && !typeChanged && !bearingChanged
                 }
 
-                if (shouldSkip) return@loadAndReplay
+                if (!shouldSkip) {
+                    if (pLat != null && pLon != null) {
+                        val dLat = lat - pLat; val dLon = lon - pLon
+                        val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
+                        if (distMeters > 2.0) lastBearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
+                    }
+                    lastLat = lat; lastLon = lon; lastTimestamp = timestamp
+                    lastMovementType = movementType
 
-                // Update bearing only when we actually moved a meaningful amount
-                if (pLat != null && pLon != null) {
-                    val dLat = lat - pLat; val dLon = lon - pLon
-                    val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
-                    if (distMeters > 2.0) lastBearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
+                    val index = AppSegmentIndex.instance ?: continue
+                    replayStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
                 }
-
-                lastLat = lat; lastLon = lon; lastTimestamp = timestamp
-                lastMovementType = movementType
-
-                val index = AppSegmentIndex.instance ?: return@loadAndReplay
-                replayStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
             }
 
             ensureActive()

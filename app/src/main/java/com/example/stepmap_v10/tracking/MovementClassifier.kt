@@ -7,16 +7,6 @@ import kotlinx.serialization.Transient
 @Serializable
 enum class MovementType { STILL, WALKING, RUNNING, BIKING, TRANSPORT }
 
-fun MovementType.slowRanking(): Int {
-    return when (this){
-        MovementType.STILL -> 1000
-        MovementType.WALKING -> 0
-        MovementType.RUNNING -> 1
-        MovementType.BIKING -> 2
-        MovementType.TRANSPORT -> 3
-    }
-}
-
 @Serializable
 class MovementClassifier {
     /* TODO OPTIONAL: Use machine learning to classify movement */
@@ -30,9 +20,6 @@ class MovementClassifier {
     private var transportLikeCount = 0
     private var bikingLikeCount = 0
 
-
-    @Transient
-    private var lastLocation: Location? = null
 
     fun classify(location: Location): MovementType {
         val speedKmh = location.speed * 3.6f

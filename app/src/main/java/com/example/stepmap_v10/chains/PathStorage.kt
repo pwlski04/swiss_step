@@ -34,7 +34,7 @@ class PathStorage {
     private val HARD_RESET_THRESHOLD = 30
     private val BFS_SEARCH_DISTANCE = 0.005
 
-    private val COMMIT_THRESHOLD = 2
+    private val COMMIT_THRESHOLD = 1
     private val pendingSpawn = HashMap<MovementType, Int>()
 
     var onChainRemoved: ((Long) -> Unit)? = null
@@ -50,7 +50,7 @@ class PathStorage {
     private fun spawnFreshPrimary(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex, now: Long) {
         val nearest = index.nearbySegments(gpsPoint.latitude, gpsPoint.longitude)
             .filter { pointToSegmentDistance(gpsPoint, it) < 0.0006 }
-            .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
+            .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
             ?: return
 
         val distToStart = gpsPoint.distanceTo(nearest.startingPoint)
@@ -162,7 +162,7 @@ class PathStorage {
 
         val bestForPrimary: Segment? = parentMap.keys
             .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
-            .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
+            .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
 
         val distToPrimary = bestForPrimary
             ?.let { pointToSegmentDistance(gpsPoint, it) }
@@ -244,7 +244,7 @@ class PathStorage {
 
                 val bestForBackup: Segment? = bParentMap.keys
                     .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
-                    .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway) }
+                    .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
                 if (bestForBackup != null) {
                     backup.pointCount++
                     backup.score += pointToSegmentDistance(gpsPoint, bestForBackup)
@@ -313,21 +313,37 @@ class PathStorage {
         onChainRemoved?.invoke(pri.chain.id)
     }
 
-    private fun highwayPenalty(highway: String): Double = when (highway) {
-        "trunk", "trunk_link",
-        "primary", "primary_link",
-        "secondary", "secondary_link",
-        "tertiary", "tertiary_link"   -> 0.0
-        "residential", "unclassified",
-        "living_street"               -> 0.0001
-        "path", "track",
-        "pedestrian", "steps"         -> 0.0002
-        "service"                     -> 0.0005
-        else                          -> 0.0001
+    private fun highwayPenalty(highway: String, movementType: MovementType): Double = when (movementType) {
+        MovementType.WALKING, MovementType.RUNNING -> when (highway) {
+            "footway", "pedestrian", "path", "track", "steps", "living_street" -> 0.0
+            "residential", "unclassified"                                       -> 0.0001
+            "service", "secondary", "secondary_link",
+            "tertiary", "tertiary_link"                                         -> 0.0002
+            "trunk", "trunk_link", "primary", "primary_link"                   -> 0.0005
+            else                                                                -> 0.0001
+        }
+        MovementType.BIKING -> when (highway) {
+            "cycleway", "path", "track"                                         -> 0.0
+            "residential", "living_street", "unclassified"                     -> 0.0001
+            "secondary", "secondary_link", "tertiary", "tertiary_link"         -> 0.0002
+            "trunk", "trunk_link", "primary", "primary_link"                   -> 0.0005
+            "footway", "pedestrian", "steps"                                   -> 0.001
+            else                                                                -> 0.0001
+        }
+        else -> when (highway) {
+            "trunk", "trunk_link", "primary", "primary_link",
+            "secondary", "secondary_link", "tertiary", "tertiary_link",
+            "rail", "light_rail", "tram", "subway"                             -> 0.0
+            "residential", "unclassified", "living_street"                     -> 0.0001
+            "footway", "path", "track", "pedestrian", "steps"                  -> 0.0002
+            "service"                                                           -> 0.0005
+            else                                                                -> 0.0001
+        }
     }
 
     /* ── Finalization ── */
 
+    @Synchronized
     fun clearSegments() {
         for (movementType in MovementType.entries) {
             chains[movementType]?.forEach { onChainRemoved?.invoke(it.id) }
