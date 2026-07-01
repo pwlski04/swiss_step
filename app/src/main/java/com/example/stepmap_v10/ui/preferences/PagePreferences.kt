@@ -15,10 +15,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -52,6 +54,7 @@ import com.example.stepmap_v10.accentColor_blue
 import com.example.stepmap_v10.accentColor_green
 import com.example.stepmap_v10.accentColor_highLights
 import com.example.stepmap_v10.gray_medium
+import com.example.stepmap_v10.gray_pale_subtle
 import com.example.stepmap_v10.text_main
 import com.example.stepmap_v10.ui.home.ShadowedButton
 
@@ -61,13 +64,18 @@ fun handleColorSelect(movementType: MovementType, color: Int, viewModel: HomeVie
     viewModel.saveColorMap()
 }
 
-@Preview
+
 @Composable
-fun PreviewPage_Preferences() {
-    Column(modifier = Modifier.fillMaxSize().background(AltColor(255, 255, 255)).verticalScroll(rememberScrollState())) {
+fun Page_Preferences(viewModel: HomeViewModel) {
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .background(AltColor(255, 255, 255))
+        .verticalScroll(rememberScrollState())) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // Bar — fills status bar area only, notch hangs below it
-            Box(modifier = Modifier.fillMaxWidth().background(accentColor_main_subtle)) {
+            Box(modifier = Modifier
+                .fillMaxWidth()
+                .background(accentColor_main_subtle)) {
                 Spacer(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -75,16 +83,22 @@ fun PreviewPage_Preferences() {
                 )
             }
             Column(modifier = Modifier.fillMaxWidth()){
-                Row(modifier = Modifier.fillMaxWidth().padding(end = 40.dp)) {
+                Row(modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = 40.dp)) {
                     Box(
-                        modifier = Modifier.weight(1f).background(
-                            accentColor_main_subtle,
-                            shape = RoundedCornerShape(bottomEnd = 20.dp)
-                        )
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(
+                                accentColor_main_subtle,
+                                shape = RoundedCornerShape(bottomEnd = 18.dp)
+                            )
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
@@ -92,7 +106,7 @@ fun PreviewPage_Preferences() {
                                     text = "Swiss",
                                     fontWeight = FontWeight.Light,
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 28.sp,
+                                    fontSize = 24.sp,
                                     color = accentColor_main
                                 )
                                 Icon(painter = painterResource(R.drawable.app_icon_outline), contentDescription = "SwissStep icon",
@@ -101,7 +115,7 @@ fun PreviewPage_Preferences() {
                                     text = "Step",
                                     fontWeight = FontWeight.Light,
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 28.sp,
+                                    fontSize = 24.sp,
                                     color = text_contrast
                                 )
                             }
@@ -114,16 +128,22 @@ fun PreviewPage_Preferences() {
                         modifier = Modifier.size(12.dp)
                     )
                 }
-                Spacer(modifier = Modifier.height(40.dp))
+                Spacer(modifier = Modifier.height(32.dp))
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(modifier = Modifier.background(gray_light_subtle, RoundedCornerShape(28.dp)).border(2.dp, text_main, RoundedCornerShape(28.dp))){
+                    Surface(color = text_contrast, modifier = Modifier
+                        .border(2.dp, gray_pale_subtle, RoundedCornerShape(28.dp)), onClick = {}){
                         Row(
-                            modifier = Modifier.width(280.dp).height(80.dp).padding(28.dp),
+                            modifier = Modifier
+                                .width(280.dp)
+                                .height(80.dp)
+                                .padding(28.dp),
                             horizontalArrangement = Arrangement.Start,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -142,7 +162,6 @@ fun PreviewPage_Preferences() {
                             Spacer(modifier = Modifier.width(28.dp))
                             Text(
                                 text = "Quandale Dingle",
-                                fontWeight = FontWeight.Medium,
                                 color = text_main,
                                 fontSize = 20.sp
                             )
@@ -150,139 +169,60 @@ fun PreviewPage_Preferences() {
                     }
                 }
             }
-        }
-    }
-}
+            Column(modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 24.dp)){
+                SettingsGroup(
+                    "Preferences",
+                    {
+                        SwitchSetting(
+                            name ="Dark mode", description = "Toggle dark mode", checked = false, onCheckedChange = { }
+                        )
+                        Divider(thickness = 2.dp, color = gray_pale_subtle)
 
+                        SwitchSetting(
+                            name ="Location points", description ="Overlay the points used for the displayed segments",
+                            checked = viewModel.showLocationPoints, onCheckedChange = { viewModel.showLocationPoints = it }
+                        )
+                        Divider(thickness = 2.dp, color = gray_pale_subtle)
 
-
-    @Composable
-fun Page_Preferences(viewModel: HomeViewModel) {
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Bar — fills status bar area only, notch hangs below it
-            Box(modifier = Modifier.fillMaxWidth().background(accentColor_main_subtle)) {
-                Spacer(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .windowInsetsTopHeight(WindowInsets.statusBars)
+                        SwitchSetting(
+                            name ="Custom path colors", description ="Customize the colors of your walked paths",
+                            checked = viewModel.showPathColorChoice, onCheckedChange = { viewModel.showPathColorChoice = it }
+                        )
+                        if(viewModel.showPathColorChoice){
+                            Column(modifier = Modifier.border(2.dp, gray_pale_subtle,
+                                RoundedCornerShape(18.dp))){
+                                for (movementType in MovementType.entries.filter { it != MovementType.STILL }) {
+                                    MovementColorPicker(movementType = movementType, viewModel = viewModel)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                }
+                            }
+                        }
+                    }
                 )
             }
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(end = 40.dp)) {
-                    Box(
-                        modifier = Modifier.weight(1f).background(
-                            accentColor_main_subtle,
-                            shape = RoundedCornerShape(bottomEnd = 20.dp)
-                        )
-                    ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(20.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = "Swiss",
-                                    fontWeight = FontWeight.Light,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 28.sp,
-                                    color = accentColor_main
-                                )
-                                Icon(
-                                    painter = painterResource(R.drawable.app_icon_outline),
-                                    contentDescription = "SwissStep icon",
-                                    modifier = Modifier.size(48.dp),
-                                    tint = AltColor.Unspecified
-                                )
-                                Text(
-                                    text = "Step",
-                                    fontWeight = FontWeight.Light,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 28.sp,
-                                    color = text_contrast
-                                )
-                            }
-                        }
-                    }
-                    InverseCornerBox(
-                        color = accentColor_main_subtle,
-                        cornerRadius = 12.dp,
-                        isLeft = false,
-                        modifier = Modifier.size(12.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(40.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(modifier = Modifier.background(accentColor_main, RoundedCornerShape(28.dp))){
-                        Row(
-                            modifier = Modifier.width(240.dp).height(80.dp).padding(28.dp),
-                            horizontalArrangement = Arrangement.Start,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.AccountCircle,
-                                    contentDescription = "Profile image",
-                                    modifier = Modifier.size(32.dp),
-                                    tint = text_contrast
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(28.dp))
-                            Text(
-                                text = "Quandale Dingle",
-                                fontWeight = FontWeight.Medium,
-                                color = text_contrast,
-                                fontSize = 16.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp)){
-            SettingsGroup(
-                "Preferences",
-                {
-                    SingularSetting(
-                        name ="Location points", description ="Overlay the points used for the displayed segments",
-                        checked = viewModel.showLocationPoints, onCheckedChange = { viewModel.showLocationPoints = it }
-                    )
-
-                    SingularSetting(
-                        name ="Custom path colors", description ="Customize the colors of your walked paths",
-                        checked = viewModel.showPathColorChoice, onCheckedChange = { viewModel.showPathColorChoice = it }
-                    )
-
-                    for (movementType in MovementType.entries.filter { it != MovementType.STILL }) {
-                        MovementColorPicker(movementType = movementType, viewModel = viewModel)
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-                }
-            )
         }
 
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp)) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp)) {
             SettingsGroup(
                 "Data",
                 {
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         ShadowedButton(content = {
                             TextButton(
                                 onClick = {},
                                 content = { Text("Export", color = text_contrast) },
-                                modifier = Modifier.width(200.dp).height(40.dp).background(
-                                    accentColor_blue, RoundedCornerShape(16.dp)
-                                ),
+                                modifier = Modifier
+                                    .width(128.dp)
+                                    .height(40.dp)
+                                    .background(
+                                        accentColor_blue, RoundedCornerShape(16.dp)
+                                    ),
                                 shape = RoundedCornerShape(16.dp)
                             )
                         })
@@ -291,9 +231,12 @@ fun Page_Preferences(viewModel: HomeViewModel) {
                             TextButton(
                                 onClick = {},
                                 content = { Text("Import", color = text_contrast) },
-                                modifier = Modifier.width(200.dp).height(40.dp).background(
-                                    gray_medium, RoundedCornerShape(16.dp)
-                                ),
+                                modifier = Modifier
+                                    .width(128.dp)
+                                    .height(40.dp)
+                                    .background(
+                                        accentColor_highLights, RoundedCornerShape(16.dp)
+                                    ),
                                 shape = RoundedCornerShape(16.dp)
                             )
                         })
@@ -304,9 +247,12 @@ fun Page_Preferences(viewModel: HomeViewModel) {
     }
 }
 
+
 @Composable
 fun SettingsGroup(title: String, content: @Composable () -> Unit){
-    Column(modifier = Modifier.fillMaxWidth().padding(8.dp)){
+    Column(modifier = Modifier
+        .fillMaxWidth()
+        .padding(8.dp)){
         Spacer(modifier = Modifier.height(40.dp))
 
         Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
@@ -320,11 +266,13 @@ fun SettingsGroup(title: String, content: @Composable () -> Unit){
 }
 
 @Composable
-fun SingularSetting(
+fun SwitchSetting(
     name: String = "Example", description: String = "This is the default description for the example setting.",
     checked: Boolean, onCheckedChange: (Boolean) -> Unit
 ){
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)){
             Text(name, fontSize = 16.sp)
             Text(description, fontSize = 12.sp)
@@ -344,7 +292,7 @@ fun SquareSwitch(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val trackColor = if (checked) AltColor(0xFF4CAF50) else AltColor(0xFFBDBDBD)
+    val trackColor = if (checked) accentColor_green else gray_light_subtle
     val thumbOffset by animateDpAsState(targetValue = if (checked) 18.dp else 0.dp)
 
     Box(
@@ -371,7 +319,8 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
     val hexCode = remember { mutableStateOf("") }
 
     Row(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
             .clip(shape = RoundedCornerShape(18.dp))
             .combinedClickable(
                 onClick = { showDialog = true },
@@ -379,7 +328,8 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
                     if (!hiddenMovementTypes.remove(movementType))
                         hiddenMovementTypes.add(movementType)
                 }
-            ).padding(vertical = 8.dp, horizontal = 16.dp),
+            )
+            .padding(vertical = 8.dp, horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -398,7 +348,8 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
                 )
             else
                 Box(
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier
+                        .size(28.dp)
                         .background(ComposeColor(currentColor), RoundedCornerShape(18.dp))
                 )
         }
