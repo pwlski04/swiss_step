@@ -60,19 +60,6 @@ fun HomeEffects(
 
     LaunchedEffect(mapView) {
         val mv = mapView ?: return@LaunchedEffect
-
-        // Apply persisted showLocationPoints state on map ready
-        if (viewModel.showLocationPoints && viewModel.rawGpsPointsLayer == null) {
-            viewModel.routeRecorder.syncDisplayPoints()
-            val layer = RawGpsPointsLayer(viewModel.routeRecorder)
-            viewModel.rawGpsPointsLayer = layer
-            mv.layerManager.layers.add(layer)
-            mv.layerManager.redrawLayers()
-        }
-    }
-
-    LaunchedEffect(mapView) {
-        val mv = mapView ?: return@LaunchedEffect
         if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
             mv.layerManager.layers.add(pathOverlayLayer)
         }

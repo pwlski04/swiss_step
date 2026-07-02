@@ -12,6 +12,20 @@ object AppRouteRecorder {
     var instance: RouteRecorder? = null
 }
 
+/* Never let a route write silently overwrite an existing file of the same name - if the
+requested name is taken, fall back to a "_1", "_2", ... suffix instead. Shared by regular saves
+and bulk import, both of which take a user/bundle-supplied name that may collide. */
+fun uniqueRouteFileName(context: Context, baseFileName: String): String {
+    var candidate = baseFileName
+    var counter = 1
+    while (File(context.filesDir, candidate).exists()) {
+        val base = candidate.removePrefix("route_").removeSuffix(".json")
+        candidate = "route_${base}_$counter.json"
+        counter++
+    }
+    return candidate
+}
+
 class RouteRecorder {
     private val recordedPoints = mutableListOf<RecordedPoint>()
     private val IN_PROGRESS_FILE = "route_inprogress.json"
@@ -37,7 +51,8 @@ class RouteRecorder {
         isRecording = false
         displayPoints.clear()
         displayPoints.addAll(recordedPoints)
-        val fileName = if (newName.length < 3) "route_${System.currentTimeMillis()}.json" else "route_${newName}.json"
+        val baseFileName = if (newName.length < 3) "route_${System.currentTimeMillis()}.json" else "route_${newName}.json"
+        val fileName = uniqueRouteFileName(context, baseFileName)
         val json = Json { prettyPrint = false }
         val text = json.encodeToString(RecordedRoute.serializer(), RecordedRoute(recordedPoints.toList()))
         File(context.filesDir, fileName).writeText(text)
@@ -131,4 +146,9 @@ data class RecordedPoint(
 @Serializable
 data class RecordedRoute(
     val points: List<RecordedPoint>
+)
+
+@Serializable
+data class RouteBundle(
+    val routes: Map<String, RecordedRoute>   // fileName -> route, for "export all" / bulk import
 )

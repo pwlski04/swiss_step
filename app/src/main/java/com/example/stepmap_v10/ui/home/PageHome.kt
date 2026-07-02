@@ -1,6 +1,8 @@
 package com.example.stepmap_v10.ui.home
 
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -95,6 +97,19 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
     var showDeleteVerificationDialogFromOptions by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
 
+    // "Save to device": lets the user pick any on-device/cloud location via the system
+    // document picker, unlike the app-to-app share sheet used by viewModel.exportRoute.
+    var pendingSaveFileName by remember { mutableStateOf<String?>(null) }
+    val saveToDeviceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val fileName = pendingSaveFileName
+        pendingSaveFileName = null
+        if (uri != null && fileName != null) {
+            viewModel.saveRouteToDevice(context, fileName, uri)
+        }
+    }
+
     val accentColorMainReplayBased by remember {
         derivedStateOf {
             if (viewModel.selectedRecording == null) accentColor_main
@@ -105,6 +120,24 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
         derivedStateOf { accentColorMainReplayBased.copy(144f/255f) }
     }
     val routeProgress by viewModel.replayProgress.collectAsState()
+
+    // Temporary green/red feedback shown over the top bar after an export attempt
+    val topBarColor by remember {
+        derivedStateOf {
+            when (viewModel.exportResult) {
+                is ExportResult.Success -> accentColor_green.copy(144f / 255f)
+                is ExportResult.Failure -> accentColor_red.copy(144f / 255f)
+                null -> accentColorMainReplayBasedSubtle
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel.exportResult) {
+        if (viewModel.exportResult != null) {
+            delay(2500)
+            viewModel.exportResult = null
+        }
+    }
 
     with(state) { // To not have to write state.xyz everywhere
         val isPressed by interactionSource_zoomIn.collectIsPressedAsState()
@@ -131,7 +164,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
         Column(modifier = Modifier.fillMaxSize()) {
             when {
                 viewModel.errorMessage != null -> Text("Map load error: ${viewModel.errorMessage}")
-                viewModel.mapFilePath == null || viewModel.themeFilePath == null -> Text("Preparing offline map...")
+                viewModel.mapFilePath == null || viewModel.themeFilePath == null -> { }
 
                 else -> Box(
                     modifier = Modifier.fillMaxSize()
@@ -168,7 +201,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                             .align(Alignment.TopCenter)
                     ) {
                         // Bar — fills status bar area only, notch hangs below it
-                        Box(modifier = Modifier.fillMaxWidth().background(accentColorMainReplayBasedSubtle)) {
+                        Box(modifier = Modifier.fillMaxWidth().background(topBarColor)) {
                             Spacer(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -183,7 +216,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 verticalAlignment = Alignment.Top,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Surface(shape = RoundedCornerShape(bottomEnd = 18.dp), color = accentColorMainReplayBasedSubtle, modifier = Modifier.weight(1f)) {
+                                Surface(shape = RoundedCornerShape(bottomEnd = 18.dp), color = topBarColor, modifier = Modifier.weight(1f)) {
                                     Box(
                                         modifier = Modifier.heightIn(min = 60.dp), contentAlignment = Alignment.CenterStart
                                     ) {
@@ -192,7 +225,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                     }
                                 }
 
-                                InverseCornerBox(color = accentColorMainReplayBasedSubtle, cornerRadius = 12.dp, isLeft = false, modifier = Modifier.size(12.dp))
+                                InverseCornerBox(color = topBarColor, cornerRadius = 12.dp, isLeft = false, modifier = Modifier.size(12.dp))
 
                                 Column{
                                     Spacer(modifier = Modifier.height(4.dp))
@@ -245,7 +278,11 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                             }
 
                             Text(
-                                text = if(viewModel.selectedRecording != null) "Zürich (replay)" else "Zürich",
+                                text = when (val result = viewModel.exportResult) {
+                                    is ExportResult.Success -> "Exported successfully as ${result.displayName}"
+                                    is ExportResult.Failure -> "Export failed"
+                                    null -> if (viewModel.selectedRecording != null) "Zürich (replay)" else "Zürich"
+                                },
                                 fontWeight = FontWeight.SemiBold,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 18.sp,
@@ -255,6 +292,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                     .fillMaxWidth()
                                     .heightIn(min = 60.dp)
                                     .wrapContentHeight(Alignment.CenterVertically)
+                                    .padding(horizontal = 4.dp)
                             )
                         }
                     }
@@ -516,6 +554,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
     if(showSaveDialog){
         RouteSaveDialog(
+            isNameTaken = { candidateName -> viewModel.savedRoutes.contains("route_${candidateName}.json") },
             onSaveAndDelete = {inputName ->
                 viewModel.routeRecorder.stopAndSave(context, inputName)
                 viewModel.refreshSavedRoutes()
@@ -538,13 +577,23 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
         var showRenameDialog by remember { mutableStateOf(false) }
 
         if (showRenameDialog) {
+            val currentFileName = viewModel.longPressedRecording!!
             RouteRenameDialog(
-                initialName = viewModel.longPressedRecording!!
+                initialName = currentFileName
                     .removePrefix("route_").removeSuffix(".json"),
+                isNameTaken = { candidateName ->
+                    val candidateFileName = "route_${candidateName}.json"
+                    viewModel.savedRoutes.any { it != currentFileName && it == candidateFileName }
+                },
                 onRename = { newName ->
-                    val oldFile = File(context.filesDir, viewModel.longPressedRecording!!)
+                    val oldFile = File(context.filesDir, currentFileName)
                     val newFileName = "route_${newName}.json"
-                    oldFile.renameTo(File(context.filesDir, newFileName))
+                    val newFile = File(context.filesDir, newFileName)
+                    // Re-check right before the actual file op: shouldn't be reachable with a
+                    // taken name (the dialog already blocks it), but never silently overwrite.
+                    if (newFileName == currentFileName || !newFile.exists()) {
+                        oldFile.renameTo(newFile)
+                    }
                     viewModel.longPressedRecording = null
                     viewModel.refreshSavedRoutes()
                 },
@@ -554,6 +603,16 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             RouteOptionsDialog(
                 routeName = viewModel.selectedRecording,
                 onRename = { showRenameDialog = true },
+                onExport = {
+                    viewModel.exportRoute(context, viewModel.longPressedRecording!!)
+                    viewModel.longPressedRecording = null
+               },
+                onSaveToDevice = {
+                    val fileName = viewModel.longPressedRecording!!
+                    pendingSaveFileName = fileName
+                    saveToDeviceLauncher.launch(fileName)
+                    viewModel.longPressedRecording = null
+                },
                 onDelete = { showDeleteVerificationDialogFromOptions = true },
                 onCancel = { viewModel.longPressedRecording = null }
             )
@@ -565,7 +624,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
 /* DIALOG BOXES */
 @Composable
-private fun DialogBox(onDismiss: () -> Unit, title: String, subTitle: String, buttonsWithSpacers: @Composable () -> Unit){
+fun DialogBox(onDismiss: () -> Unit, title: String, subTitle: String?, buttonsWithSpacers: @Composable () -> Unit){
     Dialog(onDismissRequest = onDismiss){
         Surface(shape = RoundedCornerShape(16.dp)) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -575,17 +634,19 @@ private fun DialogBox(onDismiss: () -> Unit, title: String, subTitle: String, bu
                     fontSize = 20.sp,
                     color = text_main
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(subTitle, fontSize = 16.sp, color = gray_dark)
+                if(subTitle != null){
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(subTitle, fontSize = 16.sp, color = gray_dark)
+                }
                 Spacer(modifier = Modifier.height(12.dp))
 
                 buttonsWithSpacers()
 
-                Spacer(modifier = Modifier.height(4.dp))
+                /*Spacer(modifier = Modifier.height(4.dp))
 
                 TextButton(onClick = onDismiss, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                     Text("Cancel", textDecoration = TextDecoration.Underline, color = gray_medium)
-                }
+                }*/
             }
         }
     }
@@ -595,12 +656,26 @@ private fun DialogBox(onDismiss: () -> Unit, title: String, subTitle: String, bu
 private fun RouteOptionsDialog(
     routeName: String?,
     onRename: () -> Unit,
+    onExport: () -> Unit,
+    onSaveToDevice: () -> Unit,
     onDelete: () -> Unit,
     onCancel: () -> Unit
 ) {
-    DialogBox(onDismiss = onCancel, title = "Route $routeName", subTitle = "Select an option:", buttonsWithSpacers = {
+    DialogBox(onDismiss = onCancel, title = "$routeName", subTitle = "Select an option:", buttonsWithSpacers = {
         OutlinedButton(onClick = onRename, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_blue)) {
             Text("Rename", color = text_main)
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        OutlinedButton(onClick = onExport, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_blue)) {
+            Text("Share", color = text_main)
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        OutlinedButton(onClick = onSaveToDevice, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_blue)) {
+            Text("Save to device", color = text_main)
         }
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -648,44 +723,69 @@ private fun RouteDeleteVerificationDialog(
 }
 
 
+/* ROUTE NAMING
+Route names become part of a file name ("route_<name>.json"), so the allowed character set has
+to stay safe for the filesystem (no path separators, no "." to rule out ".."/extension games,
+no other filesystem-special characters) - but within that constraint, normal punctuation
+(spaces, hyphens, underscores, apostrophes) is fine and much less strict than letters/digits-only. */
+private const val ROUTE_NAME_MIN_LENGTH = 3
+private const val ROUTE_NAME_MAX_LENGTH = 15
+
+fun filterNameInput(input: String): String =
+    input.filter { it.isLetterOrDigit() || it in " -_'" }
+
+private fun isValidRouteName(name: String): Boolean =
+    name.trim().length in ROUTE_NAME_MIN_LENGTH..ROUTE_NAME_MAX_LENGTH
+
 @Composable
 private fun RouteSaveDialog(
+    isNameTaken: (String) -> Boolean,
     onSaveAndDelete: (String) -> Unit,
     onBack: () -> Unit
 ) {
     var inputName by remember { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    val trimmedName = inputName.trim()
+    val nameTaken = trimmedName.isNotEmpty() && isNameTaken(trimmedName)
+    val canSave = isValidRouteName(inputName) && !nameTaken
+
+    fun submit() {
+        if (canSave) {
+            onSaveAndDelete(trimmedName)
+            keyboardController?.hide()
+        }
+    }
+
     DialogBox(onDismiss = onBack, title = "Rename route", subTitle = "Enter new name:", buttonsWithSpacers = {
         OutlinedTextField(
             value = inputName,
             onValueChange = { input ->
-                val filtered = input.filter { it.isLetterOrDigit() }
-                if (filtered.length <= 15) inputName = filtered
+                val filtered = filterNameInput(input)
+                if (filtered.length <= ROUTE_NAME_MAX_LENGTH) inputName = filtered
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    if (inputName.length in 3..15) {
-                        onSaveAndDelete(inputName)
-                        keyboardController?.hide()
-                    }
-                }
-            ),
+            keyboardActions = KeyboardActions(onDone = { submit() }),
             modifier = Modifier.fillMaxWidth()
         )
+
+        if (nameTaken) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "A route with this name already exists",
+                color = accentColor_red,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.SpaceBetween) {
             OutlinedButton(
-                onClick = {
-                    if (inputName.length in 3..15) {
-                        onSaveAndDelete(inputName)
-                        keyboardController?.hide()
-                    }
-                }, enabled = inputName.length in 3..15, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_green)) {
+                onClick = { submit() },
+                enabled = canSave, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_green)) {
                 Text("Save and rename", color = text_main)
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -700,42 +800,53 @@ private fun RouteSaveDialog(
 @Composable
 private fun RouteRenameDialog(
     initialName: String,
+    isNameTaken: (String) -> Boolean,
     onRename: (String) -> Unit,
     onBack: () -> Unit
 ) {
     var inputName by remember { mutableStateOf(initialName) }
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    val trimmedName = inputName.trim()
+    val nameTaken = trimmedName != initialName.trim() && isNameTaken(trimmedName)
+    val canRename = isValidRouteName(inputName) && !nameTaken
+
+    fun submit() {
+        if (canRename) {
+            onRename(trimmedName)
+            keyboardController?.hide()
+        }
+    }
+
     DialogBox(onDismiss = onBack, title = "Rename route", subTitle = "Enter new name:", buttonsWithSpacers = {
         OutlinedTextField(
             value = inputName,
             onValueChange = { input ->
-                val filtered = input.filter { it.isLetterOrDigit() }
-                if (filtered.length <= 15) inputName = filtered
+                val filtered = filterNameInput(input)
+                if (filtered.length <= ROUTE_NAME_MAX_LENGTH) inputName = filtered
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    if (inputName.length in 3..15) {
-                        onRename(inputName)
-                        keyboardController?.hide()
-                    }
-                }
-            ),
+            keyboardActions = KeyboardActions(onDone = { submit() }),
             modifier = Modifier.fillMaxWidth()
         )
+
+        if (nameTaken) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "A route with this name already exists",
+                color = accentColor_red,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.SpaceBetween) {
             OutlinedButton(
-                onClick = {
-                    if (inputName.length in 3..15) {
-                        onRename(inputName)
-                        keyboardController?.hide()
-                    }
-                }, enabled = inputName.length in 3..15, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_green)) {
+                onClick = { submit() },
+                enabled = canRename, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_green)) {
                 Text("Rename", color = text_main)
             }
         }

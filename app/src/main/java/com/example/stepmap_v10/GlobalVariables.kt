@@ -23,10 +23,13 @@ var hiddenMovementTypes = mutableStateListOf<MovementType>(MovementType.STILL)
 
 
 /* COLORS */
+val page_background = DirectColor(248, 243, 247)
+
 val gray_pale_subtle = DirectColor(red = 240, green = 240, blue = 240, 144)    // Color(red = 240, green = 240, blue = 240, 144)
-val gray_light_subtle = DirectColor(red = 180, green = 180, blue = 180, 144)    // Color(red = 240, green = 240, blue = 240, 144)
-val gray_light = DirectColor(180, 180, 180)
-val gray_medium = DirectColor(128, 128, 128)
+val gray_pale = DirectColor(240, 240, 240)
+val gray_light_subtle = DirectColor(red = 220, green = 220, blue = 220, 144)    // Color(red = 240, green = 240, blue = 240, 144)
+val gray_light = DirectColor(220, 220, 220)
+val gray_medium = DirectColor(180, 180, 180)
 val gray_dark = DirectColor(64, 64, 64)
 
 

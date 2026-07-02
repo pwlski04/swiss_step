@@ -1,25 +1,33 @@
 package com.example.stepmap_v10.ui.preferences
 
+import android.content.Context
 import android.graphics.Color
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.graphics.Color as AltColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,13 +38,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.stepmap_v10.accentColor_main
 import com.example.stepmap_v10.accentColor_main_subtle
-import com.example.stepmap_v10.gray_light_subtle
+import com.example.stepmap_v10.gray_light
 import com.example.stepmap_v10.defaultColorMap
 import com.example.stepmap_v10.colorMap
 import com.example.stepmap_v10.hiddenMovementTypes
@@ -52,11 +61,12 @@ import com.github.skydoves.colorpicker.compose.rememberColorPickerController
 import com.example.stepmap_v10.R
 import com.example.stepmap_v10.accentColor_blue
 import com.example.stepmap_v10.accentColor_green
-import com.example.stepmap_v10.accentColor_highLights
-import com.example.stepmap_v10.gray_medium
-import com.example.stepmap_v10.gray_pale_subtle
+import com.example.stepmap_v10.gray_light_subtle
+import com.example.stepmap_v10.page_background
 import com.example.stepmap_v10.text_main
+import com.example.stepmap_v10.ui.home.DialogBox
 import com.example.stepmap_v10.ui.home.ShadowedButton
+import com.example.stepmap_v10.ui.home.filterNameInput
 
 
 fun handleColorSelect(movementType: MovementType, color: Int, viewModel: HomeViewModel) {
@@ -66,10 +76,21 @@ fun handleColorSelect(movementType: MovementType, color: Int, viewModel: HomeVie
 
 
 @Composable
-fun Page_Preferences(viewModel: HomeViewModel) {
+fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
+    var inputName by remember { mutableStateOf("") }
+
+    // "Save all to device": system document picker, so "device files" is always a destination
+    // regardless of which share-target apps are installed (unlike viewModel.exportAllRoutes).
+    val saveAllToDeviceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let { viewModel.saveAllRoutesToDevice(context, it) }
+    }
+    var showNameDialog by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier
         .fillMaxSize()
-        .background(AltColor(255, 255, 255))
+        .background(page_background)
         .verticalScroll(rememberScrollState())) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // Bar — fills status bar area only, notch hangs below it
@@ -82,10 +103,12 @@ fun Page_Preferences(viewModel: HomeViewModel) {
                         .windowInsetsTopHeight(WindowInsets.statusBars)
                 )
             }
-            Column(modifier = Modifier.fillMaxWidth()){
-                Row(modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(end = 40.dp)) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 40.dp)
+                ) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -94,25 +117,31 @@ fun Page_Preferences(viewModel: HomeViewModel) {
                                 shape = RoundedCornerShape(bottomEnd = 18.dp)
                             )
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
+                                    .heightIn(min = 60.dp)
+                                   //.padding(16.dp)
+                                ,
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
                                 Text(
-                                    text = "Swiss",
+                                    text = "swiss",
                                     fontWeight = FontWeight.Light,
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 24.sp,
                                     color = accentColor_main
                                 )
-                                Icon(painter = painterResource(R.drawable.app_icon_outline), contentDescription = "SwissStep icon",
-                                    modifier = Modifier.size(48.dp), tint = AltColor.Unspecified)
+                                Icon(
+                                    painter = painterResource(R.drawable.app_icon_outline),
+                                    contentDescription = "SwissStep icon",
+                                    modifier = Modifier.size(48.dp),
+                                    tint = AltColor.Unspecified
+                                )
                                 Text(
-                                    text = "Step",
+                                    text = "step",
                                     fontWeight = FontWeight.Light,
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 24.sp,
@@ -137,14 +166,19 @@ fun Page_Preferences(viewModel: HomeViewModel) {
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Surface(color = text_contrast, modifier = Modifier
-                        .border(2.dp, gray_pale_subtle, RoundedCornerShape(28.dp)), onClick = {}){
+                    Surface(
+                        color = page_background,
+                        modifier = Modifier.clip(shape = RoundedCornerShape(28.dp))
+                            .border(2.dp, gray_light_subtle, RoundedCornerShape(28.dp))
+                            .combinedClickable(
+                                onClick = {}, onLongClick = { showNameDialog = true }
+                            )) {
                         Row(
                             modifier = Modifier
-                                .width(280.dp)
+                                .defaultMinSize(minWidth = 200.dp)
                                 .height(80.dp)
-                                .padding(28.dp),
-                            horizontalArrangement = Arrangement.Start,
+                                .padding(vertical = 28.dp, horizontal = 60.dp),
+                            horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
@@ -159,9 +193,11 @@ fun Page_Preferences(viewModel: HomeViewModel) {
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(28.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+
                             Text(
-                                text = "Quandale Dingle",
+                                text = viewModel.userName,
+                                overflow = TextOverflow.Ellipsis,
                                 color = text_main,
                                 fontSize = 20.sp
                             )
@@ -169,29 +205,31 @@ fun Page_Preferences(viewModel: HomeViewModel) {
                     }
                 }
             }
+
+
             Column(modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp)){
+                .padding(start = 20.dp, end = 20.dp)){
                 SettingsGroup(
                     "Preferences",
                     {
                         SwitchSetting(
                             name ="Dark mode", description = "Toggle dark mode", checked = false, onCheckedChange = { }
                         )
-                        Divider(thickness = 2.dp, color = gray_pale_subtle)
+                        Divider(thickness = 2.dp, color = gray_light_subtle)
 
                         SwitchSetting(
                             name ="Location points", description ="Overlay the points used for the displayed segments",
                             checked = viewModel.showLocationPoints, onCheckedChange = { viewModel.showLocationPoints = it }
                         )
-                        Divider(thickness = 2.dp, color = gray_pale_subtle)
+                        Divider(thickness = 2.dp, color = gray_light_subtle)
 
                         SwitchSetting(
                             name ="Custom path colors", description ="Customize the colors of your walked paths",
                             checked = viewModel.showPathColorChoice, onCheckedChange = { viewModel.showPathColorChoice = it }
                         )
                         if(viewModel.showPathColorChoice){
-                            Column(modifier = Modifier.border(2.dp, gray_pale_subtle,
+                            Column(modifier = Modifier.border(2.dp, gray_light_subtle,
                                 RoundedCornerShape(18.dp))){
                                 for (movementType in MovementType.entries.filter { it != MovementType.STILL }) {
                                     MovementColorPicker(movementType = movementType, viewModel = viewModel)
@@ -202,51 +240,95 @@ fun Page_Preferences(viewModel: HomeViewModel) {
                     }
                 )
             }
-        }
 
-        Column(modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp)) {
-            SettingsGroup(
-                "Data",
-                {
-                    Row(modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        ShadowedButton(content = {
-                            TextButton(
-                                onClick = {},
-                                content = { Text("Export", color = text_contrast) },
-                                modifier = Modifier
-                                    .width(128.dp)
-                                    .height(40.dp)
-                                    .background(
-                                        accentColor_blue, RoundedCornerShape(16.dp)
-                                    ),
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                        })
-                        Spacer(modifier = Modifier.height(20.dp))
-                        ShadowedButton(content = {
-                            TextButton(
-                                onClick = {},
-                                content = { Text("Import", color = text_contrast) },
-                                modifier = Modifier
-                                    .width(128.dp)
-                                    .height(40.dp)
-                                    .background(
-                                        accentColor_highLights, RoundedCornerShape(16.dp)
-                                    ),
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                        })
+
+            Column(modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp)) {
+                SettingsGroup(
+                    "Routes",
+                    {
+                        Row(modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(vertical = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            ShadowedButton(content = {
+                                Row(modifier = Modifier.height(60.dp).width(140.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(gray_light_subtle)
+                                    .clickable(onClick = { saveAllToDeviceLauncher.launch("export_all_routes.json") }),     // for share instead: onClick = { viewModel.exportAllRoutes(context) }
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ){
+                                    Icon(
+                                        imageVector = Icons.Outlined.FileDownload,
+                                        tint = text_main,
+                                        contentDescription = ("Download routes"),
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Export", color = text_main)
+                                }
+                            })
+                            ShadowedButton(content = {
+                                Row(modifier = Modifier.height(60.dp).width(140.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(gray_light_subtle)
+                                    .clickable(onClick = { saveAllToDeviceLauncher.launch("export_all_routes.json") }),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ){
+                                    Icon(
+                                        imageVector = Icons.Outlined.FileUpload,
+                                        tint = text_main,
+                                        contentDescription = ("Upload routes"),
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Import", color = text_main)
+                                }
+                            })
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     }
-}
 
+    if(showNameDialog){
+        DialogBox(
+            onDismiss = { showNameDialog = false },
+            title = "Display name",
+            subTitle = null,
+            buttonsWithSpacers = {
+                OutlinedTextField(
+                    value = inputName,
+                    shape = RoundedCornerShape(18.dp),
+                    onValueChange = { input ->
+                        val filtered = filterNameInput(input)
+                        if (filtered.length <= 24) inputName = filtered
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = accentColor_main_subtle)
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+
+                TextButton(
+                    onClick = {
+                        viewModel.userName = inputName
+                        showNameDialog = false
+                    },
+                    shape = RoundedCornerShape(16.dp), modifier = Modifier.width(100.dp).background(color = accentColor_blue, shape = RoundedCornerShape(16.dp))
+                ) {
+                    Text("Done", color = text_contrast)
+                }
+            }
+        )
+    }
+}
 
 @Composable
 fun SettingsGroup(title: String, content: @Composable () -> Unit){
@@ -257,7 +339,7 @@ fun SettingsGroup(title: String, content: @Composable () -> Unit){
 
         Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Column(modifier = Modifier.fillMaxWidth()){
             content()
@@ -292,7 +374,7 @@ fun SquareSwitch(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val trackColor = if (checked) accentColor_green else gray_light_subtle
+    val trackColor = if (checked) accentColor_green else gray_light
     val thumbOffset by animateDpAsState(targetValue = if (checked) 18.dp else 0.dp)
 
     Box(
@@ -334,7 +416,7 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(modifier = Modifier.width(80.dp),
-            color = if(hiddenMovementTypes.contains(movementType)) gray_light_subtle else AltColor(0,0,0),
+            color = if(hiddenMovementTypes.contains(movementType)) gray_light else AltColor(0,0,0),
             text = movementType.name.lowercase().replaceFirstChar { it.uppercase() },
             fontSize = 16.sp
         )
@@ -343,7 +425,7 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
             if (hiddenMovementTypes.contains(movementType))
                 Icon(
                     imageVector = Icons.Filled.VisibilityOff,
-                    tint = gray_light_subtle,
+                    tint = gray_light,
                     contentDescription = ("Hide " + movementType),
                 )
             else

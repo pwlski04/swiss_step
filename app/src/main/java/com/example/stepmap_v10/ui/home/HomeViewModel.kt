@@ -2,9 +2,12 @@ package com.example.stepmap_v10.ui.home
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,16 +27,24 @@ import com.example.stepmap_v10.tracking.AppSegmentIndex
 import com.example.stepmap_v10.tracking.TrackingLiveState
 import com.example.stepmap_v10.tracking.loadIsDrawing
 import com.example.stepmap_v10.chains.AppRouteRecorder
+import com.example.stepmap_v10.chains.RecordedRoute
+import com.example.stepmap_v10.chains.RouteBundle
+import com.example.stepmap_v10.chains.uniqueRouteFileName
 import com.example.stepmap_v10.map.RawGpsPointsLayer
 import com.example.stepmap_v10.chains.RouteRecorder
 import com.example.stepmap_v10.colorMap
 import com.example.stepmap_v10.tracking.LocationTrackingService
 import com.example.stepmap_v10.tracking.MovementType
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import org.mapsforge.core.model.LatLong
+import java.io.File
 
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -66,9 +77,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     var longPressedRecording: String? by mutableStateOf(null)
-    private var replayJob: Job? = null
     var selectedRecording: String? by mutableStateOf(null)
     val replayProgress = MutableStateFlow(0f)
+
+    // Requests are processed one at a time; a new request always fully cancels
+    // and awaits the in-flight one before starting, however fast they arrive.
+    private val replayRequests = MutableSharedFlow<ReplayRequest>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    private sealed class ReplayRequest {
+        data class Play(val context: Context, val fileName: String) : ReplayRequest()
+        object Stop : ReplayRequest()
+    }
+
+    var exportResult by mutableStateOf<ExportResult?>(null)
 
 
     var savedRoutes = mutableStateListOf<String>()
@@ -85,6 +108,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /* PREFERENCES PAGE */
     private val prefs = getApplication<Application>().getSharedPreferences("stepbystep_prefs", Context.MODE_PRIVATE)
+
+    private var _userName by mutableStateOf(prefs.getString("userName", "[name]") ?: "[name]")
+    var userName : String
+        get() = prefs.getString("userName", "[name]") ?: "[name]"
+        set(value){
+            prefs.edit().putString("userName", value).apply()
+        }
 
     private var _showLocationPoints by mutableStateOf(prefs.getBoolean("showLocationPoints", false))
     var showLocationPoints: Boolean
@@ -127,6 +157,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         sharedMapView?.layerManager?.redrawLayers()
     }
 
+
+    /* INIT */
     init {
         val previousRecorder = AppRouteRecorder.instance
         val previousStorage = AppPathStorage.instance
@@ -175,6 +207,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         loadColorMap()
         pathOverlayLayer.useCustomColors = showPathColorChoice
         replayOverlayLayer.useCustomColors = showPathColorChoice
+
+        /* Replay requests: collectLatest guarantees the previous request is fully
+           cancelled and torn down before the next one starts touching replayStorage,
+           no matter how quickly the user switches between routes. */
+        viewModelScope.launch(Dispatchers.Default) {
+            replayRequests.collectLatest { request ->
+                when (request) {
+                    is ReplayRequest.Play -> performReplay(request.context, request.fileName)
+                    is ReplayRequest.Stop -> performStopReplay()
+                }
+            }
+        }
     }
 
 
@@ -277,16 +321,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         selectedRecording = null
         replayProgress.value = 0f
         pathOverlayLayer.isDisplayed = true
-        val previousJob = replayJob
-        replayJob = null
-        viewModelScope.launch(Dispatchers.Default) {
-            previousJob?.cancel()
-            previousJob?.join()
-            replayStorage.clearSegments()
-            withContext(Dispatchers.Main) {
-                sharedMapView?.layerManager?.redrawLayers()
-            }
-        }
+        replayRequests.tryEmit(ReplayRequest.Stop)
     }
 
     fun replayRoute(context: Context, fileName: String) {
@@ -297,85 +332,89 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         isReplayingRoute = true
         selectedRecording = fileName
         replayProgress.value = 0f
+        replayRequests.tryEmit(ReplayRequest.Play(context, fileName))
+    }
 
-        val previousJob = replayJob
-        previousJob?.cancel()
+    private suspend fun performStopReplay() {
+        replayStorage.clearSegments()
+        withContext(Dispatchers.Main) {
+            sharedMapView?.layerManager?.redrawLayers()
+        }
+    }
 
-        replayJob = viewModelScope.launch(Dispatchers.Default) {
-            // Wait for any previous replay to fully stop before touching shared state
-            previousJob?.join()
+    private suspend fun performReplay(context: Context, fileName: String) {
+        // collectLatest has already fully cancelled and awaited any previous
+        // request (Play or Stop) before invoking this, so replayStorage is safe to touch.
+        withContext(Dispatchers.Main) {
+            pathOverlayLayer.isDisplayed = false
+            sharedMapView?.layerManager?.redrawLayers()
+        }
 
-            withContext(Dispatchers.Main) {
-                pathOverlayLayer.isDisplayed = false
-                sharedMapView?.layerManager?.redrawLayers()
+        replayStorage.clearSegments()
+        routeRecorder.loadForDisplay(context, fileName)
+
+        val allPoints = routeRecorder.displayPoints.toList()
+        val totalPoints = allPoints.size.coerceAtLeast(1)
+        var processed = 0
+        var lastReportedPercent = -1
+
+        var lastLat: Double? = null
+        var lastLon: Double? = null
+        var lastTimestamp: Long? = null
+        var lastMovementType: MovementType? = null
+        var lastBearing: Double? = null
+
+        for (pt in allPoints) {
+            currentCoroutineContext().ensureActive()
+
+            processed++
+            val percent = processed * 100 / totalPoints
+            if (percent != lastReportedPercent) {
+                lastReportedPercent = percent
+                replayProgress.value = processed.toFloat() / totalPoints
             }
 
-            replayStorage.clearSegments()
-            routeRecorder.loadForDisplay(context, fileName)
+            val lat = pt.lat; val lon = pt.lon
+            val movementType = pt.movementType; val timestamp = pt.timestamp
 
-            val allPoints = routeRecorder.displayPoints.toList()
-            val totalPoints = allPoints.size.coerceAtLeast(1)
-            var processed = 0
-            var lastReportedPercent = -1
+            val pLat = lastLat; val pLon = lastLon; val pTime = lastTimestamp
 
-            var lastLat: Double? = null
-            var lastLon: Double? = null
-            var lastTimestamp: Long? = null
-            var lastMovementType: MovementType? = null
-            var lastBearing: Double? = null
+            var shouldSkip = false
+            if (pLat != null && pLon != null && pTime != null) {
+                val dLat = lat - pLat; val dLon = lon - pLon
+                val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
+                val timeDiff = timestamp - pTime
 
-            for (pt in allPoints) {
-                ensureActive()
+                val typeChanged = movementType != lastMovementType
 
-                processed++
-                val percent = processed * 100 / totalPoints
-                if (percent != lastReportedPercent) {
-                    lastReportedPercent = percent
-                    replayProgress.value = processed.toFloat() / totalPoints
-                }
+                val bearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
+                val bearingChanged = lastBearing != null &&
+                        Math.abs(((bearing - lastBearing!! + 540) % 360) - 180) > 25.0
 
-                val lat = pt.lat; val lon = pt.lon
-                val movementType = pt.movementType; val timestamp = pt.timestamp
+                shouldSkip = distMeters < 4.0 && timeDiff < 4000 && !typeChanged && !bearingChanged
+            }
 
-                val pLat = lastLat; val pLon = lastLon; val pTime = lastTimestamp
-
-                var shouldSkip = false
-                if (pLat != null && pLon != null && pTime != null) {
+            if (!shouldSkip) {
+                if (pLat != null && pLon != null) {
                     val dLat = lat - pLat; val dLon = lon - pLon
                     val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
-                    val timeDiff = timestamp - pTime
-
-                    val typeChanged = movementType != lastMovementType
-
-                    val bearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
-                    val bearingChanged = lastBearing != null &&
-                            Math.abs(((bearing - lastBearing!! + 540) % 360) - 180) > 25.0
-
-                    shouldSkip = distMeters < 4.0 && timeDiff < 4000 && !typeChanged && !bearingChanged
+                    if (distMeters > 2.0) lastBearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
                 }
+                lastLat = lat; lastLon = lon; lastTimestamp = timestamp
+                lastMovementType = movementType
 
-                if (!shouldSkip) {
-                    if (pLat != null && pLon != null) {
-                        val dLat = lat - pLat; val dLon = lon - pLon
-                        val distMeters = Math.sqrt(dLat*dLat + dLon*dLon) * 111_000
-                        if (distMeters > 2.0) lastBearing = Math.atan2(dLon, dLat) * 180.0 / Math.PI
-                    }
-                    lastLat = lat; lastLon = lon; lastTimestamp = timestamp
-                    lastMovementType = movementType
-
-                    val index = AppSegmentIndex.instance ?: continue
-                    replayStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
-                }
+                val index = AppSegmentIndex.instance ?: continue
+                replayStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
             }
+        }
 
-            ensureActive()
-            replayStorage.finalizeSession()
-            replayStorage.mergeChainsByType()
-            preProjectAllZoomLevels()
-            withContext(Dispatchers.Main) {
-                sharedMapView?.layerManager?.redrawLayers()
-                isReplayingRoute = false
-            }
+        currentCoroutineContext().ensureActive()
+        replayStorage.finalizeSession()
+        replayStorage.mergeChainsByType()
+        preProjectAllZoomLevels()
+        withContext(Dispatchers.Main) {
+            sharedMapView?.layerManager?.redrawLayers()
+            isReplayingRoute = false
         }
     }
 
@@ -410,4 +449,163 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             replayOverlayLayer.preProjectAll(replayStorage.chains, zoomLevel)
         }
     }
+
+    fun exportRoute(context: Context, fileName: String){
+        val displayName = fileName.removePrefix("route_").removeSuffix(".json")
+
+        viewModelScope.launch(Dispatchers.IO){
+            try {
+                val file = File(context.filesDir, fileName)
+                if(!file.exists()) throw java.io.FileNotFoundException(fileName)
+
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                withContext(Dispatchers.Main) {
+                    context.startActivity(Intent.createChooser(intent, "Export route"))
+                    exportResult = ExportResult.Success(displayName)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    exportResult = ExportResult.Failure(displayName)
+                }
+            }
+        }
+    }
+
+    fun exportAllRoutes(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val (bundleText, count) = buildAllRoutesBundleText(context)
+
+                // Written to cacheDir (not filesDir) so the bundle never shows up as a saved route itself.
+                val bundleFile = File(context.cacheDir, "export_all_routes.json")
+                bundleFile.writeText(bundleText)
+
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", bundleFile)
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                withContext(Dispatchers.Main) {
+                    context.startActivity(Intent.createChooser(intent, "Export all routes"))
+                    exportResult = ExportResult.Success("all routes ($count)")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    exportResult = ExportResult.Failure("all routes")
+                }
+            }
+        }
+    }
+
+    /* Saves directly to a location the user picks via the system "Save to device" (Storage
+    Access Framework) picker - unlike exportRoute/exportAllRoutes, this doesn't depend on which
+    apps register as ACTION_SEND share targets, so "device files" always shows up as a
+    destination regardless of what's installed. targetUri comes from an
+    ActivityResultContracts.CreateDocument launcher in the composable, since that API can only be
+    registered/launched from a Composable/Activity. */
+    fun saveRouteToDevice(context: Context, fileName: String, targetUri: Uri) {
+        val displayName = fileName.removePrefix("route_").removeSuffix(".json")
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = File(context.filesDir, fileName)
+                if (!file.exists()) throw java.io.FileNotFoundException(fileName)
+
+                context.contentResolver.openOutputStream(targetUri)?.use { out ->
+                    out.write(file.readBytes())
+                } ?: throw java.io.IOException("Could not open destination for writing")
+
+                withContext(Dispatchers.Main) {
+                    exportResult = ExportResult.Success(displayName)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    exportResult = ExportResult.Failure(displayName)
+                }
+            }
+        }
+    }
+
+    fun saveAllRoutesToDevice(context: Context, targetUri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val (bundleText, count) = buildAllRoutesBundleText(context)
+
+                context.contentResolver.openOutputStream(targetUri)?.use { out ->
+                    out.write(bundleText.toByteArray())
+                } ?: throw java.io.IOException("Could not open destination for writing")
+
+                withContext(Dispatchers.Main) {
+                    exportResult = ExportResult.Success("all routes ($count)")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    exportResult = ExportResult.Failure("all routes")
+                }
+            }
+        }
+    }
+
+    private fun buildAllRoutesBundleText(context: Context): Pair<String, Int> {
+        val fileNames = routeRecorder.listSavedRoutes(context)
+        if (fileNames.isEmpty()) throw java.io.FileNotFoundException("No saved routes")
+
+        val json = Json { ignoreUnknownKeys = true }
+        val routes = fileNames.associateWith { fileName ->
+            json.decodeFromString<RecordedRoute>(File(context.filesDir, fileName).readText())
+        }
+        return json.encodeToString(RouteBundle.serializer(), RouteBundle(routes)) to fileNames.size
+    }
+
+    fun importRoute(context: Context, uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
+                val text = inputStream.bufferedReader().readText()
+                inputStream.close()
+
+                val json = Json { ignoreUnknownKeys = true }
+
+                val bundle = try {
+                    json.decodeFromString<RouteBundle>(text)
+                } catch (e: Exception) {
+                    null
+                }
+
+                if (bundle != null) {
+                    for ((originalFileName, route) in bundle.routes) {
+                        val newFileName = uniqueRouteFileName(context, originalFileName)
+                        File(context.filesDir, newFileName)
+                            .writeText(json.encodeToString(RecordedRoute.serializer(), route))
+                    }
+                } else {
+                    json.decodeFromString<RecordedRoute>(text)  // throws if invalid
+
+                    val newFileName = uniqueRouteFileName(context, "route_${System.currentTimeMillis()}.json")
+                    File(context.filesDir, newFileName).writeText(text) // saving
+                }
+
+                withContext(Dispatchers.Main) {
+                    refreshSavedRoutes()
+                }
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+}
+
+sealed class ExportResult {
+    data class Success(val displayName: String) : ExportResult()
+    data class Failure(val displayName: String) : ExportResult()
 }

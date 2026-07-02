@@ -63,7 +63,7 @@ fun Screen() {
         ) {
             when (page) {
                 0 -> Page_Home(context, viewModel)
-                1 -> Page_Preferences(viewModel)
+                1 -> Page_Preferences(context, viewModel)
                 else -> Page_Home(context, viewModel)
             }
         }
