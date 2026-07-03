@@ -14,15 +14,17 @@ import java.io.File
 import org.mapsforge.map.rendertheme.ExternalRenderTheme
 import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 
-private const val ZURICH_MIN_LAT = 47.32
-private const val ZURICH_MAX_LAT = 47.43
-private const val ZURICH_MIN_LON = 8.44
-private const val ZURICH_MAX_LON = 8.63
+// Matches the inSwitzerland bounds check in LocationTrackingService.handleLocation,
+// so "where we allow panning" stays consistent with "where we record".
+private const val SWITZERLAND_MIN_LAT = 45.8
+private const val SWITZERLAND_MAX_LAT = 47.9
+private const val SWITZERLAND_MIN_LON = 5.9
+private const val SWITZERLAND_MAX_LON = 10.6
 
 
 /* CREATE MAP: */
 fun createMapView(context: Context, mapFilePath: String, themeFilePath: String): MapView {
-    /* Builds a Mapsforge MapView backed by the given offline .map file and render theme, centered on Zurich and constrained to its bounds. */
+    /* Builds a Mapsforge MapView backed by the given offline .map file and render theme, centered on Switzerland and constrained to its bounds. */
     val mapFileOnDisk = File(mapFilePath)
     require(mapFileOnDisk.exists()) { "Map file does not exist: $mapFilePath" }
     require(mapFileOnDisk.length() > 0L) { "Map file is empty: $mapFilePath" }
@@ -63,7 +65,7 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
 
     mapView.setZoomLevelMin(13.toByte())
     mapView.setZoomLevelMax(20.toByte())
-    mapView.setCenter(LatLong(47.3769, 8.5417))
+    mapView.setCenter(LatLong(46.948, 7.447)) // Bern - roughly central now that the whole country is in scope
     mapView.setZoomLevel(13.toByte())
 
     constrainMapBounds(mapView)
@@ -73,8 +75,8 @@ fun createMapView(context: Context, mapFilePath: String, themeFilePath: String):
 
 fun constrainMapBounds(mapView: MapView) {
     val boundingBox = org.mapsforge.core.model.BoundingBox(
-        ZURICH_MIN_LAT, ZURICH_MIN_LON,
-        ZURICH_MAX_LAT, ZURICH_MAX_LON
+        SWITZERLAND_MIN_LAT, SWITZERLAND_MIN_LON,
+        SWITZERLAND_MAX_LAT, SWITZERLAND_MAX_LON
     )
 
     mapView.model.mapViewPosition.setMapLimit(boundingBox)

@@ -6,24 +6,6 @@ import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import io.github.pwlski04.swissstep.colorMap
 import io.github.pwlski04.swissstep.defaultColorMap
 
-/* PATH UTILS */
-fun List<Path>.toSegments(): List<Segment>{
-    /* Splits a path into all its point-by-point segments */
-    return flatMap { path ->
-        path.points.zipWithNext { start, end ->
-            Segment(
-                pathId = path.id,
-                startingPoint = start,
-                endingPoint = end,
-                highway = path.highway,
-                walkable = path.walkable,
-                drivable = path.drivable,
-                traveledBy = path.traveledBy
-            )
-        }
-    }
-}
-
 /* DRAW PATHS */
 
 fun colorForMovementType(movementType: MovementType, useCustomColors: Boolean): Int {

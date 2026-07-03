@@ -10,7 +10,6 @@ class PathUtilsTest {
         startLat: Double, startLon: Double,
         endLat: Double, endLon: Double
     ) = Segment(
-        pathId = 0L,
         startingPoint = LatLong(startLat, startLon),
         endingPoint = LatLong(endLat, endLon),
         highway = "footway",

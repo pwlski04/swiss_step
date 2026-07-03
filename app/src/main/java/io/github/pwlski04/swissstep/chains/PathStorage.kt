@@ -759,7 +759,13 @@ class PathStorage {
         /*
         BFS over the segment graph from the segment nearest `from` to the one nearest `to`, capped
         at 3x the straight-line distance so it doesn't wander arbitrarily far looking for a connection.
+        `from`/`to` are historical chain bridge points, not necessarily near wherever the live/replay
+        window currently is, so the windowed index needs an explicit nudge to page segments in around
+        them before it can find anything nearby.
         */
+        index.ensureLoaded(from.latitude, from.longitude, "finalize")
+        index.ensureLoaded(to.latitude, to.longitude, "finalize")
+
         val fromSeg = index.nearbySegments(from.latitude, from.longitude)
             .minByOrNull { pointToSegmentDistance(from, it) } ?: return null
         val toSeg = index.nearbySegments(to.latitude, to.longitude)

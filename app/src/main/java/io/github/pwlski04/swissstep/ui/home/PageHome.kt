@@ -82,7 +82,9 @@ import io.github.pwlski04.swissstep.R
 
 /*
 TODO:
-    - more cities
+    - expand map to rest of Switzerland
+    - loading screen
+    - tutorial/information screens
  */
 
 @Composable

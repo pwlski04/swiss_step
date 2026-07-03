@@ -320,6 +320,7 @@ class LocationTrackingService: Service() {
                     storage.lastActiveMovementType
                 }
                 AppRouteRecorder.instance?.recordPoint(location.latitude, location.longitude, movementType)
+                index.ensureLoaded(location.latitude, location.longitude, "live")
                 storage.onGpsPoint(
                     LatLong(location.latitude, location.longitude),
                     effectiveType,

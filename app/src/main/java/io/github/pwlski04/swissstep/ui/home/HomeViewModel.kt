@@ -13,10 +13,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.pwlski04.swissstep.chains.PathOverlayLayer
 import io.github.pwlski04.swissstep.chains.PathStorage
-import io.github.pwlski04.swissstep.paths.Path
+import io.github.pwlski04.swissstep.paths.SegmentDatabase
 import io.github.pwlski04.swissstep.paths.SegmentIndex
-import io.github.pwlski04.swissstep.paths.loadPathsFromGeoJson
-import io.github.pwlski04.swissstep.paths.toSegments
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,7 +65,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         replayStorage.onChainRemoved = { id -> it.evictFromCache(id) }
     }
 
-    var allPaths by mutableStateOf<List<Path>>(emptyList())
     var mapFilePath by mutableStateOf<String?>(null)
     var themeFilePath by mutableStateOf<String?>(null)
     var errorMessage by mutableStateOf<String?>(null)
@@ -227,25 +224,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadFilesAndPaths() {
         /*
-        This function 1. loads the map and 2. loads all raw paths, then turns them into path
-        segments. Is called during app initialization.
+        This function 1. loads the map and 2. opens the bundled segment database that
+        SegmentIndex pages segments in from on demand. Is called during app initialization.
         */
         viewModelScope.launch {
             try {
                 val context = getApplication<Application>()
                 val (mapPath, themePath) = withContext(Dispatchers.IO) {
-                    copyAssetToInternalStorage(context, "zurich.map") to
+                    copyAssetToInternalStorage(context, "switzerland.map") to
                             copyAssetToInternalStorage(context, "minmap.xml")
                 }
                 mapFilePath = mapPath
                 themeFilePath = themePath
 
-                val loadedPaths = withContext(Dispatchers.IO) {
-                    loadPathsFromGeoJson(context)
-                }
-                allPaths = loadedPaths
-                segmentIndex = withContext(Dispatchers.Default) {
-                    SegmentIndex(loadedPaths.toSegments()).also{
+                segmentIndex = withContext(Dispatchers.IO) {
+                    val dbPath = copyAssetToInternalStorage(context, "switzerland_paths.db")
+                    SegmentIndex(SegmentDatabase(dbPath)).also {
                         AppSegmentIndex.instance = it
                     }
                 }
@@ -409,6 +403,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 lastMovementType = movementType
 
                 val index = AppSegmentIndex.instance ?: continue
+                index.ensureLoaded(lat, lon, "replay")
 
                 val effectiveType = if (movementType != MovementType.STILL) {
                     movementType
