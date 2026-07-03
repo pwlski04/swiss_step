@@ -12,8 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
@@ -56,8 +54,6 @@ fun HomeEffects(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* no action needed on result */ }
-    var hasInitiallyCentered by remember { mutableStateOf(false) }
-
     LaunchedEffect(mapView) {
         val mv = mapView ?: return@LaunchedEffect
         if (!mv.layerManager.layers.contains(pathOverlayLayer)) {
@@ -145,15 +141,12 @@ fun HomeEffects(
         val point = latestLivePoint ?: return@LaunchedEffect
         viewModel.sharedMapView.centerMap(LatLong(point.lat, point.lon))
     }
-    LaunchedEffect(latestLivePoint) {
-        if (hasInitiallyCentered) return@LaunchedEffect
+    LaunchedEffect(viewModel.sharedMapView, latestLivePoint) {
+        if (viewModel.hasInitiallyCentered) return@LaunchedEffect
         val mv = viewModel.sharedMapView ?: return@LaunchedEffect
         val point = latestLivePoint ?: return@LaunchedEffect
         mv.model.mapViewPosition.setCenter(LatLong(point.lat, point.lon))
-        hasInitiallyCentered = true
-    }
-    DisposableEffect(Unit) {
-        onDispose { hasInitiallyCentered = false }
+        viewModel.hasInitiallyCentered = true
     }
 
     /* OTHER */

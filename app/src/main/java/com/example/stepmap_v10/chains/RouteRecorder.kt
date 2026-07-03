@@ -12,10 +12,12 @@ object AppRouteRecorder {
     var instance: RouteRecorder? = null
 }
 
-/* Never let a route write silently overwrite an existing file of the same name - if the
-requested name is taken, fall back to a "_1", "_2", ... suffix instead. Shared by regular saves
-and bulk import, both of which take a user/bundle-supplied name that may collide. */
 fun uniqueRouteFileName(context: Context, baseFileName: String): String {
+    /*
+    Never let a route write overwrite an existing file of the same name - if the
+    requested name is taken, fall back to a "_1", "_2", ... suffix instead. Shared by regular saves
+    and bulk import, both of which take a user/bundle-supplied name that may collide.
+    */
     var candidate = baseFileName
     var counter = 1
     while (File(context.filesDir, candidate).exists()) {
@@ -36,7 +38,7 @@ class RouteRecorder {
 
     fun startRecording() {
         recordedPoints.clear()
-        displayPoints.clear()
+        synchronized(displayPoints) { displayPoints.clear() }
         isRecording = true
     }
 
@@ -44,13 +46,15 @@ class RouteRecorder {
         if (!isRecording || movementType == MovementType.STILL) return
         val point = RecordedPoint(lat, lon, System.currentTimeMillis(), movementType)
         recordedPoints.add(point)
-        displayPoints.add(point)
+        synchronized(displayPoints) { displayPoints.add(point) }
     }
 
     fun stopAndSave(context: Context, newName: String = ""): String {
         isRecording = false
-        displayPoints.clear()
-        displayPoints.addAll(recordedPoints)
+        synchronized(displayPoints) {
+            displayPoints.clear()
+            displayPoints.addAll(recordedPoints)
+        }
         val baseFileName = if (newName.length < 3) "route_${System.currentTimeMillis()}.json" else "route_${newName}.json"
         val fileName = uniqueRouteFileName(context, baseFileName)
         val json = Json { prettyPrint = false }
@@ -75,8 +79,10 @@ class RouteRecorder {
             val route = json.decodeFromString<RecordedRoute>(file.readText())
             recordedPoints.clear()
             recordedPoints.addAll(route.points)
-            displayPoints.clear()
-            displayPoints.addAll(route.points)
+            synchronized(displayPoints) {
+                displayPoints.clear()
+                displayPoints.addAll(route.points)
+            }
             isRecording = true
             true
         } catch (e: Exception) {
@@ -108,15 +114,19 @@ class RouteRecorder {
     }
 
     fun syncDisplayPoints() {
-        displayPoints.clear()
-        displayPoints.addAll(recordedPoints)
+        synchronized(displayPoints) {
+            displayPoints.clear()
+            displayPoints.addAll(recordedPoints)
+        }
     }
 
     fun loadForDisplay(context: Context, fileName: String) {
         val json = Json { ignoreUnknownKeys = true }
         val route = json.decodeFromString<RecordedRoute>(File(context.filesDir, fileName).readText())
-        displayPoints.clear()
-        displayPoints.addAll(route.points)
+        synchronized(displayPoints) {
+            displayPoints.clear()
+            displayPoints.addAll(route.points)
+        }
     }
 
     fun cleanStillPointsFromSavedRoutes(context: Context) {

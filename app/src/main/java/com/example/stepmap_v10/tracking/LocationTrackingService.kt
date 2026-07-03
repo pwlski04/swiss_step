@@ -18,8 +18,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.stepmap_v10.paths.PathPoint
-import com.example.stepmap_v10.paths.findNearestSegment
-import com.example.stepmap_v10.paths.pointToSegmentDistance
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -292,13 +290,8 @@ class LocationTrackingService: Service() {
             val storage = AppPathStorage.instance ?: return
             val index   = AppSegmentIndex.instance ?: return
 
-            val nearest = findNearestSegment(location.latitude, location.longitude, index)
-                ?: return
-            val dist = pointToSegmentDistance(
-                LatLong(location.latitude, location.longitude), nearest
-            )
-
-            if (dist < 0.0006) {
+            val inSwitzerland = location.latitude in 45.8..47.9 && location.longitude in 5.9..10.6
+            if (inSwitzerland) {
                 val effectiveType = if (movementType != MovementType.STILL) {
                     storage.lastActiveMovementType = movementType
                     movementType

@@ -55,6 +55,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     var sharedMapView by mutableStateOf<MapView?>(null)
     var rawGpsPointsLayer: RawGpsPointsLayer? = null
+    var hasInitiallyCentered = false
 
     val pathStorage = PathStorage()
     val pathOverlayLayer = PathOverlayLayer(pathStorage).also {
@@ -353,7 +354,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         replayStorage.clearSegments()
         routeRecorder.loadForDisplay(context, fileName)
 
-        val allPoints = routeRecorder.displayPoints.toList()
+        val allPoints = synchronized(routeRecorder.displayPoints) { routeRecorder.displayPoints.toList() }
         val totalPoints = allPoints.size.coerceAtLeast(1)
         var processed = 0
         var lastReportedPercent = -1
@@ -404,7 +405,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 lastMovementType = movementType
 
                 val index = AppSegmentIndex.instance ?: continue
-                replayStorage.onGpsPoint(LatLong(lat, lon), movementType, index)
+
+                val effectiveType = if (movementType != MovementType.STILL) {
+                    movementType
+                } else {
+                    replayStorage.lastActiveMovementType
+                }
+                replayStorage.onGpsPoint(LatLong(lat, lon), effectiveType, index)
             }
         }
 
@@ -507,13 +514,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /* Saves directly to a location the user picks via the system "Save to device" (Storage
-    Access Framework) picker - unlike exportRoute/exportAllRoutes, this doesn't depend on which
-    apps register as ACTION_SEND share targets, so "device files" always shows up as a
-    destination regardless of what's installed. targetUri comes from an
-    ActivityResultContracts.CreateDocument launcher in the composable, since that API can only be
-    registered/launched from a Composable/Activity. */
     fun saveRouteToDevice(context: Context, fileName: String, targetUri: Uri) {
+        /*
+        Saves directly to a location the user picks via the system "Save to device" (Storage
+        Access Framework) picker.
+        */
         val displayName = fileName.removePrefix("route_").removeSuffix(".json")
 
         viewModelScope.launch(Dispatchers.IO) {

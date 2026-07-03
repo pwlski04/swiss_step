@@ -19,7 +19,7 @@ class RawGpsPointsLayer(private val routeRecorder: RouteRecorder) : Layer() {
 
     override fun draw(boundingBox: BoundingBox, zoomLevel: Byte, canvas: Canvas, topLeftPoint: Point, rotation: Rotation) {
         val mapSize = MercatorProjection.getMapSize(zoomLevel, displayModel.tileSize)
-        val points = routeRecorder.displayPoints
+        val points = synchronized(routeRecorder.displayPoints) { routeRecorder.displayPoints.toList() }
 
         for (point in points) {
             val ll = LatLong(point.lat, point.lon)

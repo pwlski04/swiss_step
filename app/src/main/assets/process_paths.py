@@ -24,7 +24,9 @@ wanted = {
 
     # tram tracks if mapped separately:
     "tram",
-    "rail"
+    "rail",
+    "light_rail",
+    "subway"
 }
 
 walkable_streets = {
@@ -70,9 +72,7 @@ def simplify_points(points, keep_every=2):
     return simplified
 
 
-def classify_path(props):
-    highway = props.get("highway")
-
+def classify_path(props, highway):
     walkable = highway in walkable_streets
     drivable = highway in drivable_streets
 
@@ -104,12 +104,16 @@ paths = []
 
 for feature in data["features"]:
     props = feature.get("properties", {})
+    # Railways (rail/tram/light_rail/subway) are tagged via the separate
+    # "railway" key in OSM, not "highway" - fall back to it so tracks aren't
+    # silently dropped.
     highway = props.get("highway")
-
+    if highway not in wanted:
+        highway = props.get("railway")
     if highway not in wanted:
         continue
 
-    classification = classify_path(props)
+    classification = classify_path(props, highway)
     if classification is None:
             continue
     walkable, drivable = classification

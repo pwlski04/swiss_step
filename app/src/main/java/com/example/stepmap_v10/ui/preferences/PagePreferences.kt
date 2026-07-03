@@ -35,6 +35,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -88,124 +90,63 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
     }
     var showNameDialog by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier
-        .fillMaxSize()
-        .background(page_background)
-        .verticalScroll(rememberScrollState())) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Bar — fills status bar area only, notch hangs below it
-            Box(modifier = Modifier
-                .fillMaxWidth()
-                .background(accentColor_main_subtle)) {
-                Spacer(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .windowInsetsTopHeight(WindowInsets.statusBars)
-                )
-            }
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(end = 40.dp)
-                ) {
-                    Box(
+    val density = LocalDensity.current
+    var logoBarHeight by remember { mutableStateOf(0.dp) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier
+            .fillMaxSize()
+            .background(page_background)
+            .verticalScroll(rememberScrollState())) {
+            Spacer(modifier = Modifier.height(logoBarHeight))
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = page_background,
+                    modifier = Modifier.clip(shape = RoundedCornerShape(28.dp))
+                        .border(2.dp, gray_light_subtle, RoundedCornerShape(28.dp))
+                        .combinedClickable(
+                            onClick = {}, onLongClick = { showNameDialog = true }
+                        )) {
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .background(
-                                accentColor_main_subtle,
-                                shape = RoundedCornerShape(bottomEnd = 18.dp)
-                            )
+                            .defaultMinSize(minWidth = 200.dp)
+                            .height(80.dp)
+                            .padding(vertical = 28.dp, horizontal = 60.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 60.dp)
-                                   //.padding(16.dp)
-                                ,
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = "swiss",
-                                    fontWeight = FontWeight.Light,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 24.sp,
-                                    color = accentColor_main
-                                )
-                                Icon(
-                                    painter = painterResource(R.drawable.app_icon_outline),
-                                    contentDescription = "SwissStep icon",
-                                    modifier = Modifier.size(48.dp),
-                                    tint = AltColor.Unspecified
-                                )
-                                Text(
-                                    text = "step",
-                                    fontWeight = FontWeight.Light,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 24.sp,
-                                    color = text_contrast
-                                )
-                            }
-                        }
-                    }
-                    InverseCornerBox(
-                        color = accentColor_main_subtle,
-                        cornerRadius = 12.dp,
-                        isLeft = false,
-                        modifier = Modifier.size(12.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(32.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = page_background,
-                        modifier = Modifier.clip(shape = RoundedCornerShape(28.dp))
-                            .border(2.dp, gray_light_subtle, RoundedCornerShape(28.dp))
-                            .combinedClickable(
-                                onClick = {}, onLongClick = { showNameDialog = true }
-                            )) {
-                        Row(
-                            modifier = Modifier
-                                .defaultMinSize(minWidth = 200.dp)
-                                .height(80.dp)
-                                .padding(vertical = 28.dp, horizontal = 60.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.AccountCircle,
-                                    contentDescription = "Profile image",
-                                    modifier = Modifier.size(40.dp),
-                                    tint = text_main
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Text(
-                                text = viewModel.userName,
-                                overflow = TextOverflow.Ellipsis,
-                                color = text_main,
-                                fontSize = 20.sp
+                            Icon(
+                                imageVector = Icons.Outlined.AccountCircle,
+                                contentDescription = "Profile image",
+                                modifier = Modifier.size(40.dp),
+                                tint = text_main
                             )
                         }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Text(
+                            text = viewModel.userName,
+                            overflow = TextOverflow.Ellipsis,
+                            color = text_main,
+                            fontSize = 20.sp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                     }
                 }
             }
-
 
             Column(modifier = Modifier
                 .fillMaxWidth()
@@ -289,6 +230,87 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                         }
                     }
                 )
+            }
+        }
+
+        // Logo bar — pinned to the top of the screen, content scrolls underneath it
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .onGloballyPositioned { coordinates ->
+                    logoBarHeight = with(density) { coordinates.size.height.toDp() }
+                }
+        ) {
+            // Solid backing so the translucent accent color doesn't show scrolled content through it
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(page_background)
+            )
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+            // Bar — fills status bar area only, notch hangs below it
+            Box(modifier = Modifier
+                .fillMaxWidth()
+                .background(accentColor_main_subtle)) {
+                Spacer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsTopHeight(WindowInsets.statusBars)
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = 40.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(
+                            accentColor_main_subtle,
+                            shape = RoundedCornerShape(bottomEnd = 18.dp)
+                        )
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 60.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "swiss",
+                                fontWeight = FontWeight.Light,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 24.sp,
+                                color = accentColor_main
+                            )
+                            Icon(
+                                painter = painterResource(R.drawable.app_icon_outline),
+                                contentDescription = "SwissStep icon",
+                                modifier = Modifier.size(48.dp),
+                                tint = AltColor.Unspecified
+                            )
+                            Text(
+                                text = "step",
+                                fontWeight = FontWeight.Light,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 24.sp,
+                                color = text_contrast
+                            )
+                        }
+                    }
+                }
+                InverseCornerBox(
+                    color = accentColor_main_subtle,
+                    cornerRadius = 12.dp,
+                    isLeft = false,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
             }
         }
     }

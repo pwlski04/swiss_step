@@ -33,6 +33,8 @@ class PathStorage {
     private val MAX_BACKUPS = 3
     private val HARD_RESET_THRESHOLD = 30
     private val BFS_SEARCH_DISTANCE = 0.005
+    private val OTHER_TYPE_STALE_THRESHOLD = 15
+    private var globalCallCounter = 0L
 
     private val COMMIT_THRESHOLD = 1
     private val pendingSpawn = HashMap<MovementType, Int>()
@@ -66,7 +68,10 @@ class PathStorage {
             dirty = true
         )
         chains[movementType]?.add(chain)
-        val hyp = PathHypothesis(id = nextHypId++, chain = chain, lastSegment = nearest, timestamp = now)
+        val hyp = PathHypothesis(
+            id = nextHypId++, chain = chain, lastSegment = nearest, timestamp = now,
+            lastCommitGpsPoint = gpsPoint, lastTouchedCounter = globalCallCounter
+        )
         primary[movementType] = hyp
         modifiedMovementTypes.add(movementType)
         onChainsChanged?.invoke()
@@ -134,6 +139,7 @@ class PathStorage {
 
     @Synchronized
     fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex) {
+        globalCallCounter++
         if (movementType == MovementType.STILL) return
 
         lastActiveMovementType = movementType
@@ -146,7 +152,17 @@ class PathStorage {
         }
         bkps.removeAll { now - it.timestamp > LIVE_GAP_THRESHOLD_MS }
 
-        val currentPrimary = primary[movementType]
+        var currentPrimary = primary[movementType]
+        if (currentPrimary != null && globalCallCounter - currentPrimary.lastTouchedCounter > OTHER_TYPE_STALE_THRESHOLD) {
+            val lastPoint = currentPrimary.chain.points.lastOrNull()
+            val staleButNearby = lastPoint != null && gpsPoint.distanceTo(lastPoint) <= MAX_CONTINUITY_DISTANCE
+            if (!staleButNearby) {
+                primary.remove(movementType)
+                bkps.clear()
+                currentPrimary = null
+            }
+        }
+
         if (currentPrimary == null) {
             val count = (pendingSpawn[movementType] ?: 0) + 1
             pendingSpawn[movementType] = count
@@ -157,11 +173,13 @@ class PathStorage {
             return
         }
         pendingSpawn.remove(movementType)
+        currentPrimary.lastTouchedCounter = globalCallCounter
 
-        val parentMap = getReachableCached(currentPrimary, index)
+        val (parentMap, distMap) = getReachableCached(currentPrimary, index)
 
         val bestForPrimary: Segment? = parentMap.keys
             .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
+            .filter { isPlausibleDetour(currentPrimary.lastCommitGpsPoint, it, distMap[it] ?: 0.0) }
             .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
 
         val distToPrimary = bestForPrimary
@@ -178,12 +196,12 @@ class PathStorage {
                 if (bestForPrimary === currentPrimary.pendingSegment) {
                     currentPrimary.pendingCount++
                     if (currentPrimary.pendingCount >= COMMIT_THRESHOLD) {
-                        // Commit — just extend, no history trimming
                         extendChainWithPath(
                             currentPrimary.chain, parentMap,
                             bestForPrimary!!, currentPrimary.chain.points.last()
                         )
                         currentPrimary.lastSegment = bestForPrimary!!
+                        currentPrimary.lastCommitGpsPoint = gpsPoint
                         currentPrimary.chain.dirty = true
                         currentPrimary.pendingSegment = null
                         currentPrimary.pendingCount = 0
@@ -195,6 +213,16 @@ class PathStorage {
             } else {
                 currentPrimary.pendingSegment = null
                 currentPrimary.pendingCount = 0
+
+                val chainLast = currentPrimary.chain.points.lastOrNull()
+                if (chainLast != null) {
+                    val far = if (chainLast.distanceTo(bestForPrimary!!.startingPoint) < chainLast.distanceTo(bestForPrimary.endingPoint))
+                        bestForPrimary.endingPoint else bestForPrimary.startingPoint
+                    if (chainLast.distanceTo(far) > 0.00001 && gpsPoint.distanceTo(far) < gpsPoint.distanceTo(chainLast)) {
+                        currentPrimary.chain.points.addLast(far)
+                        currentPrimary.chain.dirty = true
+                    }
+                }
             }
 
             if (bkps.size < MAX_BACKUPS) {
@@ -216,13 +244,14 @@ class PathStorage {
                     extendChain(backupChain, alt, backupChain.points.last())
                     bkps.add(PathHypothesis(
                         id = nextHypId++, chain = backupChain, lastSegment = alt,
-                        timestamp = now, score = currentPrimary.score, pointCount = currentPrimary.pointCount
+                        timestamp = now, lastCommitGpsPoint = gpsPoint, lastTouchedCounter = globalCallCounter,
+                        score = currentPrimary.score, pointCount = currentPrimary.pointCount
                     ))
                 }
             }
 
             bkps.removeAll { backup ->
-                getReachableCached(backup, index).keys
+                getReachableCached(backup, index).first.keys
                     .none { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE * 2.0 }
             }
 
@@ -239,11 +268,32 @@ class PathStorage {
                 return
             }
 
+            val closeReanchor = index.nearbySegments(gpsPoint.latitude, gpsPoint.longitude)
+                .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
+                .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
+            if (closeReanchor != null) {
+                val lastPoint = currentPrimary.chain.points.last()
+                val jumpDist = minOf(
+                    lastPoint.distanceTo(closeReanchor.startingPoint),
+                    lastPoint.distanceTo(closeReanchor.endingPoint)
+                )
+                if (jumpDist <= MAX_CONTINUITY_DISTANCE) {
+                    extendChain(currentPrimary.chain, closeReanchor, lastPoint)
+                    currentPrimary.lastSegment = closeReanchor
+                    currentPrimary.lastCommitGpsPoint = gpsPoint
+                    currentPrimary.missCount = 0
+                    modifiedMovementTypes.add(movementType)
+                    onChainsChanged?.invoke()
+                    return
+                }
+            }
+
             for (backup in bkps) {
-                val bParentMap = getReachableCached(backup, index)
+                val (bParentMap, bDistMap) = getReachableCached(backup, index)
 
                 val bestForBackup: Segment? = bParentMap.keys
                     .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
+                    .filter { isPlausibleDetour(backup.lastCommitGpsPoint, it, bDistMap[it] ?: 0.0) }
                     .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
                 if (bestForBackup != null) {
                     backup.pointCount++
@@ -252,6 +302,7 @@ class PathStorage {
                     if (bestForBackup !== backup.lastSegment) {
                         extendChainWithPath(backup.chain, bParentMap, bestForBackup, backup.chain.points.last())
                         backup.lastSegment = bestForBackup
+                        backup.lastCommitGpsPoint = gpsPoint
                     }
                     backup.missCount = 0
                 } else {
@@ -270,6 +321,30 @@ class PathStorage {
                     chains[movementType]?.add(bestBackup.chain)
                     primary[movementType] = bestBackup
                     bestBackup.missCount = 0
+                } else {
+                    val reanchor = index.nearbySegments(gpsPoint.latitude, gpsPoint.longitude)
+                        .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
+                        .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
+                    if (reanchor != null) {
+                        val lastPoint = currentPrimary.chain.points.last()
+                        val jumpDist = minOf(
+                            lastPoint.distanceTo(reanchor.startingPoint),
+                            lastPoint.distanceTo(reanchor.endingPoint)
+                        )
+                        if (jumpDist <= MAX_CONTINUITY_DISTANCE) {
+                            extendChain(currentPrimary.chain, reanchor, lastPoint)
+                            currentPrimary.lastSegment = reanchor
+                            currentPrimary.lastCommitGpsPoint = gpsPoint
+                            currentPrimary.missCount = 0
+                            currentPrimary.pendingSegment = null
+                            currentPrimary.pendingCount = 0
+                        } else {
+                            primary.remove(movementType)
+                            bkps.clear()
+                            spawnFreshPrimary(gpsPoint, movementType, index, now)
+                            return
+                        }
+                    }
                 }
             }
         }
@@ -278,33 +353,54 @@ class PathStorage {
         onChainsChanged?.invoke()
     }
 
-    private fun getReachableSegmentsWithPath(start: Segment, index: SegmentIndex): Map<Segment, Segment?> {
+
+    private fun getReachableSegmentsWithPath(start: Segment, index: SegmentIndex): Pair<Map<Segment, Segment?>, Map<Segment, Double>> {
+        /*
+        Returns both the parent chain (for path reconstruction) and the shortest cumulative path
+        distance to each reachable segment. Uses Dijkstra (priority queue), where
+        edges are weighted by segment length.
+        */
         val parentMap = mutableMapOf<Segment, Segment?>()
-        val queue     = ArrayDeque<Pair<Segment, Double>>()
+        val distMap = mutableMapOf<Segment, Double>()
+        val queue = java.util.PriorityQueue<Pair<Segment, Double>>(compareBy { it.second })
         parentMap[start] = null
+        distMap[start] = 0.0
         queue.add(Pair(start, 0.0))
         while (queue.isNotEmpty()) {
-            val (seg, dist) = queue.removeFirst()
+            val (seg, dist) = queue.poll()!!
+            if (dist > distMap[seg]!!) continue
             if (dist > BFS_SEARCH_DISTANCE) continue
             val segLen = seg.startingPoint.distanceTo(seg.endingPoint)
             for (connected in index.connectedSegments(seg)) {
-                if (connected !in parentMap) {
+                val newDist = dist + segLen
+                if (newDist < (distMap[connected] ?: Double.MAX_VALUE)) {
+                    distMap[connected] = newDist
                     parentMap[connected] = seg
-                    queue.add(Pair(connected, dist + segLen))
+                    queue.add(Pair(connected, newDist))
                 }
             }
         }
-        return parentMap
+        return parentMap to distMap
     }
 
-    private fun getReachableCached(hyp: PathHypothesis, index: SegmentIndex): Map<Segment, Segment?> {
-        if (hyp.cachedForSegment === hyp.lastSegment && hyp.cachedReachable != null) {
-            return hyp.cachedReachable!!
+    private fun getReachableCached(hyp: PathHypothesis, index: SegmentIndex): Pair<Map<Segment, Segment?>, Map<Segment, Double>> {
+        if (hyp.cachedForSegment === hyp.lastSegment && hyp.cachedReachable != null && hyp.cachedDistances != null) {
+            return hyp.cachedReachable!! to hyp.cachedDistances!!
         }
-        val result = getReachableSegmentsWithPath(hyp.lastSegment, index)
-        hyp.cachedReachable = result
+        val (parentMap, distMap) = getReachableSegmentsWithPath(hyp.lastSegment, index)
+        hyp.cachedReachable = parentMap
+        hyp.cachedDistances = distMap
         hyp.cachedForSegment = hyp.lastSegment
-        return result
+        return parentMap to distMap
+    }
+
+
+    private fun isPlausibleDetour(fromPoint: LatLong, candidate: Segment, pathDist: Double): Boolean {
+        val straightLine = minOf(
+            fromPoint.distanceTo(candidate.startingPoint),
+            fromPoint.distanceTo(candidate.endingPoint)
+        )
+        return pathDist <= straightLine * 3.0 + 0.0001
     }
 
     private fun removePrimary(movementType: MovementType) {
@@ -315,11 +411,12 @@ class PathStorage {
 
     private fun highwayPenalty(highway: String, movementType: MovementType): Double = when (movementType) {
         MovementType.WALKING, MovementType.RUNNING -> when (highway) {
-            "footway", "pedestrian", "path", "track", "steps", "living_street" -> 0.0
+            "footway", "pedestrian", "path", "track", "living_street"          -> 0.0
             "residential", "unclassified"                                       -> 0.0001
             "service", "secondary", "secondary_link",
             "tertiary", "tertiary_link"                                         -> 0.0002
-            "trunk", "trunk_link", "primary", "primary_link"                   -> 0.0005
+            "trunk", "trunk_link", "primary", "primary_link", "steps"          -> 0.0005
+            "rail", "light_rail", "tram", "subway"                             -> 0.001
             else                                                                -> 0.0001
         }
         MovementType.BIKING -> when (highway) {
@@ -328,6 +425,7 @@ class PathStorage {
             "secondary", "secondary_link", "tertiary", "tertiary_link"         -> 0.0002
             "trunk", "trunk_link", "primary", "primary_link"                   -> 0.0005
             "footway", "pedestrian", "steps"                                   -> 0.001
+            "rail", "light_rail", "tram", "subway"                             -> 0.001
             else                                                                -> 0.0001
         }
         else -> when (highway) {
@@ -364,6 +462,7 @@ class PathStorage {
         modifiedMovementTypes.clear()
     }
 
+    @Synchronized
     fun mergeChainsByType() {
         for (movementType in MovementType.entries) {
             val chainList = chains[movementType] ?: continue
@@ -428,75 +527,173 @@ class PathStorage {
         onChainsChanged?.invoke()
     }
 
+    private data class BridgeCandidate(
+        val dist: Double,
+        val otherPoint: LatLong,
+        val otherChain: PathChain,
+        val chainPointIdx: Int
+    )
+
+    private enum class BridgeDirection { HEAD, TAIL }
+    private val BRIDGE_ID_WINDOW = 3
+
+    private fun findBestBridgeCandidate(
+        chain: PathChain,
+        candidateTypes: List<MovementType>,
+        chainPointsToCheck: List<Pair<Int, LatLong>>,
+        direction: BridgeDirection,
+        excludeChain: PathChain? = null
+    ): BridgeCandidate? {
+        val candidates = candidateTypes.flatMap { chains[it] ?: emptyList() }
+            .filter { it !== chain && it !== excludeChain }
+        val nearestChains = when (direction) {
+            BridgeDirection.HEAD -> candidates.filter { it.id < chain.id }.sortedByDescending { it.id }
+            BridgeDirection.TAIL -> candidates.filter { it.id > chain.id }.sortedBy { it.id }
+        }.take(BRIDGE_ID_WINDOW)
+
+        var best: BridgeCandidate? = null
+        for (otherChain in nearestChains) {
+            for (otherPoint in otherChain.points) {
+                for ((idx, chainPoint) in chainPointsToCheck) {
+                    val dist = otherPoint.distanceTo(chainPoint)
+                    if (best == null || dist < best!!.dist) {
+                        best = BridgeCandidate(dist, otherPoint, otherChain, idx)
+                    }
+                }
+            }
+        }
+        return best
+    }
+
     internal fun bridgeMovementTypeGaps(index: SegmentIndex?) {
-        val threshold = 0.0008
+        val threshold = 0.01
+        val straightLineFallbackThreshold = 0.0008
 
         for (movementType in MovementType.entries) {
             val typeChains = chains[movementType] ?: continue
+            val crossTypes = MovementType.entries.filter { it != movementType }
             for (chain in typeChains) {
                 if (chain.points.size < 2) continue
 
-                var bestDist = Double.MAX_VALUE
-                var bestOtherPoint: LatLong? = null
-                var bestChainPointIdx = 0
+                val headCheckPoints = (0 until minOf(5, chain.points.size)).map { it to chain.points[it] }
+                var headCandidate = findBestBridgeCandidate(chain, crossTypes, headCheckPoints, BridgeDirection.HEAD)
 
-                for (otherType in MovementType.entries) {
-                    if (otherType == movementType) continue
-                    for (otherChain in chains[otherType] ?: emptyList()) {
-                        for ((_, otherPoint) in otherChain.points.withIndex()) {
-                            for (idx in 0 until minOf(5, chain.points.size)) {
-                                val dist = otherPoint.distanceTo(chain.points[idx])
-                                if (dist < bestDist) {
-                                    bestDist = dist
-                                    bestOtherPoint = otherPoint
-                                    bestChainPointIdx = idx
-                                }
-                            }
-                        }
-                    }
+                if (movementType == MovementType.TRANSPORT && (headCandidate == null || headCandidate.dist !in 0.00002..threshold)) {
+                    headCandidate = findBestBridgeCandidate(chain, listOf(movementType), headCheckPoints, BridgeDirection.HEAD)
                 }
+
+                val bestDist = headCandidate?.dist ?: Double.MAX_VALUE
+                val bestOtherPoint = headCandidate?.otherPoint
+                val bestOtherChain = headCandidate?.otherChain
+                val bestChainPointIdx = headCandidate?.chainPointIdx ?: 0
 
                 Log.d("BRIDGE", "$movementType bestDist=$bestDist bestChainIdx=$bestChainPointIdx")
-                if (bestDist !in 0.00002..threshold || bestOtherPoint == null) continue
+                val headBridged = bestDist in 0.00002..threshold && bestOtherPoint != null
 
-                // Remove points before bestChainPointIdx
-                repeat(bestChainPointIdx) { chain.points.removeFirst() }
+                if (headBridged) {
+                    // Remove points before bestChainPointIdx
+                    repeat(bestChainPointIdx) { chain.points.removeFirst() }
 
-                if (index != null) {
-                    val bridgePath = findRoadPath(bestOtherPoint, chain.points.first(), index)
-                    if (bridgePath != null && bridgePath.isNotEmpty()) {
-                        var lastPoint: LatLong = bestOtherPoint
-                        val pointsToAdd = mutableListOf<LatLong>()
+                    if (index != null) {
+                        var bridgePath = findRoadPath(bestOtherPoint!!, chain.points.first(), index)
+                        if (bridgePath != null && !isPlausibleBridgePath(bestDist, bridgePath)) {
+                            bridgePath = null
+                        }
+                        if (bridgePath != null && bridgePath.isNotEmpty()) {
+                            var lastPoint: LatLong = bestOtherPoint
+                            val pointsToAdd = mutableListOf<LatLong>()
 
-                        pointsToAdd.add(bestOtherPoint)  // ← explicitly anchor to junction point
+                            pointsToAdd.add(bestOtherPoint)  // ← explicitly anchor to junction point
 
-                        for (seg in bridgePath) {
-                            val s = seg.startingPoint
-                            val e = seg.endingPoint
-                            if (lastPoint.distanceTo(s) <= lastPoint.distanceTo(e)) {
-                                if (lastPoint.distanceTo(s) > 0.00001) pointsToAdd.add(s)
-                                pointsToAdd.add(e)
-                                lastPoint = e
-                            } else {
-                                if (lastPoint.distanceTo(e) > 0.00001) pointsToAdd.add(e)
-                                pointsToAdd.add(s)
-                                lastPoint = s
+                            for ((segIdx, seg) in bridgePath.withIndex()) {
+                                val s = seg.startingPoint
+                                val e = seg.endingPoint
+                                if (segIdx == bridgePath.size - 1) {
+                                    val target = chain.points.first()
+                                    val nearer = if (s.distanceTo(target) <= e.distanceTo(target)) s else e
+                                    if (lastPoint.distanceTo(nearer) > 0.00001) pointsToAdd.add(nearer)
+                                    lastPoint = nearer
+                                } else if (lastPoint.distanceTo(s) <= lastPoint.distanceTo(e)) {
+                                    if (lastPoint.distanceTo(s) > 0.00001) pointsToAdd.add(s)
+                                    pointsToAdd.add(e)
+                                    lastPoint = e
+                                } else {
+                                    if (lastPoint.distanceTo(e) > 0.00001) pointsToAdd.add(e)
+                                    pointsToAdd.add(s)
+                                    lastPoint = s
+                                }
                             }
-                        }
 
-                        if (lastPoint.distanceTo(chain.points.first()) > 0.00002) {
-                            pointsToAdd.add(chain.points.first())
-                            chain.points.removeFirst()
-                        }
+                            if (lastPoint.distanceTo(chain.points.first()) > 0.00002) {
+                                pointsToAdd.add(chain.points.first())
+                                chain.points.removeFirst()
+                            }
 
-                        for (pt in pointsToAdd.reversed()) chain.points.addFirst(pt)
-                        Log.d("BRIDGE", "Road bridged with ${pointsToAdd.size} points, starts at ${chain.points.first()}")
-                    } else {
-                        chain.points.addFirst(bestOtherPoint)
-                        Log.d("BRIDGE", "Straight line bridge")
+                            for (pt in pointsToAdd.reversed()) chain.points.addFirst(pt)
+                            Log.d("BRIDGE", "Road bridged with ${pointsToAdd.size} points, starts at ${chain.points.first()}")
+                        } else if (bestDist <= straightLineFallbackThreshold) {
+                            chain.points.addFirst(bestOtherPoint)
+                            Log.d("BRIDGE", "Straight line bridge")
+                        }
                     }
+                    chain.dirty = true
                 }
-                chain.dirty = true
+
+                /*
+                Symmetric pass: the above only ever pulls a chain's HEAD backward to meet
+                something earlier. Uses only the literal last point
+                 */
+                val tailPoint = chain.points.last()
+                val excludeChain = if (headBridged) bestOtherChain else null
+                val tailCheckPoints = listOf(0 to tailPoint)
+
+                var tailCandidate = findBestBridgeCandidate(chain, crossTypes, tailCheckPoints, BridgeDirection.TAIL, excludeChain)
+                if (movementType == MovementType.TRANSPORT &&
+                    (tailCandidate == null || tailCandidate.dist !in 0.00002..threshold)
+                ) {
+                    tailCandidate = findBestBridgeCandidate(chain, listOf(movementType), tailCheckPoints, BridgeDirection.TAIL, excludeChain)
+                }
+                val bestTailDist = tailCandidate?.dist ?: Double.MAX_VALUE
+                val bestTailOtherPoint = tailCandidate?.otherPoint
+
+                if (bestTailDist in 0.00002..threshold && bestTailOtherPoint != null) {
+                    if (index != null) {
+                        var tailBridgePath = findRoadPath(chain.points.last(), bestTailOtherPoint, index)
+                        if (tailBridgePath != null && !isPlausibleBridgePath(bestTailDist, tailBridgePath)) {
+                            tailBridgePath = null
+                        }
+                        if (tailBridgePath != null && tailBridgePath.isNotEmpty()) {
+                            var lastPoint: LatLong = chain.points.last()
+                            for ((segIdx, seg) in tailBridgePath.withIndex()) {
+                                val s = seg.startingPoint
+                                val e = seg.endingPoint
+                                if (segIdx == tailBridgePath.size - 1) {
+                                    // Same overshoot guard as the head bridge above - only add
+                                    // whichever endpoint is actually closer to the target.
+                                    val nearer = if (s.distanceTo(bestTailOtherPoint) <= e.distanceTo(bestTailOtherPoint)) s else e
+                                    if (lastPoint.distanceTo(nearer) > 0.00001) chain.points.addLast(nearer)
+                                    lastPoint = nearer
+                                } else if (lastPoint.distanceTo(s) <= lastPoint.distanceTo(e)) {
+                                    if (lastPoint.distanceTo(s) > 0.00001) chain.points.addLast(s)
+                                    chain.points.addLast(e)
+                                    lastPoint = e
+                                } else {
+                                    if (lastPoint.distanceTo(e) > 0.00001) chain.points.addLast(e)
+                                    chain.points.addLast(s)
+                                    lastPoint = s
+                                }
+                            }
+                            if (lastPoint.distanceTo(bestTailOtherPoint) > 0.00002) {
+                                chain.points.addLast(bestTailOtherPoint)
+                            }
+                            Log.d("BRIDGE", "Tail road bridged, ends at ${chain.points.last()}")
+                        } else if (bestTailDist <= straightLineFallbackThreshold) {
+                            chain.points.addLast(bestTailOtherPoint)
+                            Log.d("BRIDGE", "Tail straight line bridge")
+                        }
+                    }
+                    chain.dirty = true
+                }
             }
         }
     }
@@ -542,6 +739,13 @@ class PathStorage {
         return null
     }
 
+    private fun isPlausibleBridgePath(straightDist: Double, path: List<Segment>): Boolean {
+        if (straightDist <= 0.0) return true
+        val pathLen = path.sumOf { it.startingPoint.distanceTo(it.endingPoint) }
+        val ratio = pathLen / straightDist
+        val extra = pathLen - straightDist
+        return ratio <= 1.5 || extra <= 0.0018
+    }
 
     /* ── Persistence ── */
 

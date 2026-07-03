@@ -33,6 +33,10 @@ data class PathHypothesis(
     val chain: PathChain,
     var lastSegment: Segment,
     var timestamp: Long,
+
+    var lastCommitGpsPoint: LatLong,
+    var lastTouchedCounter: Long = 0,
+
     var score: Double = 0.0,
     var missCount: Int = 0,
     var pointCount: Int = 0,
@@ -40,5 +44,6 @@ data class PathHypothesis(
     var pendingCount: Int = 0,
 
     var cachedReachable: Map<Segment, Segment?>? = null,
+    var cachedDistances: Map<Segment, Double>? = null,
     var cachedForSegment: Segment? = null
 )
