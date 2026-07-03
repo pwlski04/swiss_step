@@ -16,21 +16,21 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:name=".StepByStepApp"
+        android:name=".SwissStepApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/app_icon"
-        android:label="Swiss Step"
+        android:label="swiss step"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.StepByStep_v10">
+        android:theme="@style/Theme.SwissStep">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="step by step"
-            android:theme="@style/Theme.StepByStep_v10">
+            android:label="swiss step"
+            android:theme="@style/Theme.SwissStep">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

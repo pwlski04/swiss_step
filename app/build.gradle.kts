@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.stepmap_v10"
+    namespace = "io.github.pwlski04.swissstep"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -13,7 +13,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.stepbystep_v10"
+        applicationId = "io.github.pwlski04.swissstep"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

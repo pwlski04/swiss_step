@@ -23,5 +23,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "StepByStep_v1.0"
+rootProject.name = "SwissStep"
 include(":app")
