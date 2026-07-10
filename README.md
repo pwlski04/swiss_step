@@ -2,16 +2,16 @@
 
 An Android app that tracks the paths you actually walk, bike, run, or take transit on, and draws them onto an offline map of Switzerland as you go.
 
-Built as a personal project while studying at ETH Zurich, to explore offline map rendering, background location tracking, and Jetpack Compose.
+Built as a personal project to explore offline map rendering, background location tracking, and Jetpack Compose.
 
 ## What it does
 
-- **Live GPS tracking** — a foreground service records your location in the background (even with the app closed) and classifies your movement in real time as still, walking, running, biking, or transport (car/train/tram), based on a smoothed speed model.
-- **Automatic path drawing** — recorded GPS points are snapped onto the nearest known street/path/rail segment and merged into continuous colored chains on the map, colored by movement type.
-- **Offline maps** — renders from a local [Mapsforge](https://github.com/mapsforge/mapsforge) `.map` file covering all of Switzerland, so it works without a data connection. The walking/biking/transit path network is preprocessed from an OpenStreetMap extract (`tools/process_paths.py`) into a SQLite database, grid-indexed the same way the runtime segment index is, and paged into memory on demand around the user's current position rather than loaded all at once.
-- **Route recording & replay** — start/stop recording a session as a named route, then replay it later with an animated progress indicator.
-- **Import/export** — save routes to a file or share them, and import routes recorded elsewhere.
-- **Customization** — per-movement-type path colors, toggleable raw GPS point overlay, a dark mode (switches both the app UI and the offline map's render theme), and other display preferences.
+- **Live GPS tracking**: a foreground service records your location in the background (even with the app closed) and classifies your movement in real time as still, walking, running, biking, or transport (car/train/tram), based on a smoothed speed model.
+- **Automatic path drawing**: recorded GPS points are snapped onto the nearest known street/path/rail segment and merged into continuous colored chains on the map, colored by movement type.
+- **Offline maps**: renders from a local [Mapsforge](https://github.com/mapsforge/mapsforge) `.map` file covering all of Switzerland, so it works without a data connection. The walking/biking/transit path network is preprocessed from an OpenStreetMap extract (`tools/process_paths.py`) into a SQLite database, grid-indexed the same way the runtime segment index is, and paged into memory on demand around the user's current position rather than loaded all at once.
+- **Route recording & replay**: start/stop recording a session as a named route, then replay it later with an animated progress indicator.
+- **Import/export**: save routes to a file or share them, and import routes recorded elsewhere.
+- **Customization**: per-movement-type path colors, toggleable raw GPS point overlay, a dark mode (switches both the app UI and the offline map's render theme), and other display preferences.
 
 ## How it works
 
