@@ -6,11 +6,20 @@ junitVersion = "1.1.5"
 espressoCore = "3.5.1"
 lifecycleRuntimeKtx = "2.6.1"
 activityCompose = "1.8.0"
-kotlin = "2.2.10"
+kotlin = "2.4.0"
 composeBom = "2024.09.00"
 
 mapsforge = "0.25.0"
-osmdroid = "6.1.20"
+material3 = "1.4.0"
+foundationLayout = "1.11.1"
+runtime = "1.11.2"
+lifecycleViewmodelKtx = "2.10.0"
+foundation = "1.11.2"
+runtimeVersion = "1.11.3"
+foundationVersion = "1.11.3"
+uiGeometry = "1.11.3"
+uiGraphics = "1.11.3"
+ui = "1.11.3"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -30,9 +39,18 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 
 mapsforge-map-android = { group = "org.mapsforge", name = "mapsforge-map-android", version.ref = "mapsforge" }
 mapsforge-themes = { group = "org.mapsforge", name = "mapsforge-themes", version.ref = "mapsforge" }
-osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
+androidx-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
+androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
+androidx-compose-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtime" }
+androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycleViewmodelKtx" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
+androidx-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtimeVersion" }
+androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundationVersion" }
+androidx-compose-ui-geometry = { group = "androidx.compose.ui", name = "ui-geometry", version.ref = "uiGeometry" }
+androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "uiGraphics" }
+androidx-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
