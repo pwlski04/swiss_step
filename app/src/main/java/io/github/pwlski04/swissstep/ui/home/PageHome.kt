@@ -1,6 +1,7 @@
 package io.github.pwlski04.swissstep.ui.home
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -37,8 +38,10 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -48,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -58,17 +62,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import io.github.pwlski04.swissstep.accentColor_blue
-import io.github.pwlski04.swissstep.accentColor_green
-import io.github.pwlski04.swissstep.accentColor_main
-import io.github.pwlski04.swissstep.gray_pale_subtle
-import io.github.pwlski04.swissstep.accentColor_red
-import io.github.pwlski04.swissstep.gray_dark
-import io.github.pwlski04.swissstep.gray_light_subtle
 import io.github.pwlski04.swissstep.map.LocationMarkerOverlay
 import io.github.pwlski04.swissstep.map.centerMap
-import io.github.pwlski04.swissstep.text_contrast
-import io.github.pwlski04.swissstep.text_main
+import io.github.pwlski04.swissstep.ui.theme.accentColor_blue
+import io.github.pwlski04.swissstep.ui.theme.accentColor_green
+import io.github.pwlski04.swissstep.ui.theme.accentColor_main
+import io.github.pwlski04.swissstep.ui.theme.accentColor_main_dark
+import io.github.pwlski04.swissstep.ui.theme.accentColor_red
+import io.github.pwlski04.swissstep.ui.theme.appColors
+import io.github.pwlski04.swissstep.ui.theme.gray_light_subtle
+import io.github.pwlski04.swissstep.ui.theme.gray_pale_subtle
+import io.github.pwlski04.swissstep.ui.theme.text_contrast
+import io.github.pwlski04.swissstep.ui.theme.text_main
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -82,7 +87,6 @@ import io.github.pwlski04.swissstep.R
 
 /*
 TODO:
-    - expand map to rest of Switzerland
     - loading screen
     - tutorial/information screens
  */
@@ -97,15 +101,16 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
     visibility state.
     */
 
-    val state = RememberHomeState(context, viewModel)
+    // STATE AND LOGIC
+    val state = rememberHomeState(context, viewModel)
+    val routeProgress by viewModel.replayProgress.collectAsState()
 
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showDeleteVerificationDialogFromDelete by remember { mutableStateOf(false) }
     var showDeleteVerificationDialogFromOptions by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
 
-    // "Save to device": lets the user pick any on-device/cloud location via the system
-    // document picker, unlike the app-to-app share sheet used by viewModel.exportRoute.
+    // "Save to device" button (in route options)
     var pendingSaveFileName by remember { mutableStateOf<String?>(null) }
     val saveToDeviceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -117,16 +122,27 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
         }
     }
 
+
+    // AESTHETICS
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // val portraitWidth = minOf(configuration.screenWidthDp, configuration.screenHeightDp).dp
+
     val accentColorMainReplayBased by remember {
         derivedStateOf {
-            if (viewModel.selectedRecording == null) accentColor_main
-            else Color(188, 85, 111)        // peach
+            if (viewModel.selectedRecording == null) {
+                if (viewModel.darkMap) accentColor_main_dark else accentColor_main
+            } else Color(188, 85, 111)        // peach
         }
     }
     val accentColorMainReplayBasedSubtle by remember {
-        derivedStateOf { accentColorMainReplayBased.copy(144f/255f) }
+        derivedStateOf {
+            // Dark mode uses a higher alpha too - the same 144/255 the light theme uses would
+            // blend too close to the near-black map background to read as an accent bar.
+            val alpha = if (viewModel.darkMap && viewModel.selectedRecording == null) 180f / 255f else 144f / 255f
+            accentColorMainReplayBased.copy(alpha)
+        }
     }
-    val routeProgress by viewModel.replayProgress.collectAsState()
 
     // Temporary green/red feedback shown over the top bar after an export attempt
     val topBarColor by remember {
@@ -139,15 +155,21 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
         }
     }
 
-    LaunchedEffect(viewModel.exportResult) {
-        if (viewModel.exportResult != null) {
-            delay(2500)
-            viewModel.exportResult = null
-        }
-    }
+    val colors = appColors(viewModel.darkMap)
+    // Only shows through when the map isn't covering the screen (loading/error/no-permission states)
+    val homeBackground = colors.background
+    val homeForeground = colors.foreground
 
+    val mapButtonBg = colors.mapButtonBg
+    val mapButtonIcon = colors.mapButtonIcon
+    val mapButtonRoutes = if (viewModel.darkMap) text_contrast else accentColorMainReplayBased
+
+
+    // MAIN
     with(state) { // To not have to write state.xyz everywhere
         val isPressed by interactionSource_zoomIn.collectIsPressedAsState()
+        val isZoomOutPressed by interactionSource_zoomOut.collectIsPressedAsState()
+        val isRecenterPressed by interactionSource_recenter.collectIsPressedAsState()
 
         HomeEffects(
             context = context,
@@ -168,9 +190,9 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
         )
 
         /* FRONTEND */
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().background(homeBackground)) {
             when {
-                viewModel.errorMessage != null -> Text("Map load error: ${viewModel.errorMessage}")
+                viewModel.errorMessage != null -> Text("Map load error: ${viewModel.errorMessage}", color = homeForeground)
                 viewModel.mapFilePath == null || viewModel.themeFilePath == null -> { }
 
                 else -> Box(
@@ -179,6 +201,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                     if (!hasLocationPermission) {
                         Text(
                             text = "Location permission needed.",
+                            color = homeForeground,
                             modifier = Modifier.padding(16.dp)
                         )
                     } else {
@@ -186,6 +209,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                             modifier = Modifier.fillMaxSize(),
                             mapFilePath = viewModel.mapFilePath!!,
                             themeFilePath = viewModel.themeFilePath!!,
+                            isDarkMode = viewModel.darkMap,
                             existingMapView = viewModel.sharedMapView,
                             onMapReady = { readyMapView: MapView ->
                                 if (viewModel.sharedMapView == null) {
@@ -223,7 +247,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 verticalAlignment = Alignment.Top,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Surface(shape = RoundedCornerShape(bottomEnd = 18.dp), color = topBarColor, modifier = Modifier.weight(1f)) {
+                                Surface(shape = RoundedCornerShape(bottomEnd = 18.dp), color = topBarColor, modifier = Modifier/*.width(portraitWidth)*/.weight(1f)) {
                                     Box(
                                         modifier = Modifier.heightIn(min = 60.dp), contentAlignment = Alignment.CenterStart
                                     ) {
@@ -265,7 +289,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
                                     //Spacer(modifier = Modifier.height(4.dp))
 
-                                    if (!isDrawing && viewModel.hasChainsToDisplay) {
+                                    if (!isDrawing && viewModel.hasChainsToDisplay && viewModel.routeRecorder.points.isNotEmpty()) {
 
                                         //BUTTON: REMOVE HISTORY
                                         ShadowedButton(content = {
@@ -286,9 +310,9 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
                             Text(
                                 text = when (val result = viewModel.exportResult) {
-                                    is ExportResult.Success -> "Exported successfully as ${result.displayName}"
+                                    is ExportResult.Success -> "Export successful"
                                     is ExportResult.Failure -> "Export failed"
-                                    null -> if (viewModel.selectedRecording != null) "Zürich (replay)" else "Zürich"
+                                    null -> if (viewModel.selectedRecording != null) "Replay" else ""
                                 },
                                 fontWeight = FontWeight.SemiBold,
                                 fontFamily = FontFamily.Monospace,
@@ -315,7 +339,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                     .padding(6.dp)
                                     .clip(RoundedCornerShape(18.dp))
                                     .drawBehind {
-                                        drawRect(gray_pale_subtle)
+                                        drawRect(mapButtonBg)
                                         when {
                                             isLoadingThisRoute -> drawRect(
                                                 color = accentColorMainReplayBased,
@@ -349,7 +373,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 Text(
                                     text = fileName.removePrefix("route_").removeSuffix(".json"),
                                     fontSize = 12.sp,
-                                    color = if (isSelectedRoute && !isLoadingThisRoute) text_contrast else accentColorMainReplayBased,
+                                    color = if (isSelectedRoute && !isLoadingThisRoute) text_contrast else mapButtonRoutes,
                                     modifier = Modifier.padding(vertical = 8.dp, horizontal = 14.dp)
                                 )
                             }
@@ -357,14 +381,17 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                     }
 
 
-                    Column(modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 64.dp, start = 12.dp, end = 12.dp)) {
+                    if (!isLandscape) {
+                    Column(modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = if (viewModel.savedRoutes.isEmpty()) 12.dp else 64.dp, start = 12.dp, end = 12.dp)) {
                         val point = latestLivePoint
 
                         // BUTTON: RECENTER MAP
                         ShadowedButton(content = {
                             Surface(
-                                color = if (isPressed) gray_pale_subtle.copy(alpha = 0.7f) else if (isFollowingLocation) gray_light_subtle else gray_pale_subtle,
+                                color = if (isRecenterPressed) mapButtonBg.copy(alpha = 0.7f) else mapButtonBg,
                                 modifier = Modifier.padding(4.dp).clip(shape=RoundedCornerShape(18.dp)).combinedClickable(
+                                    interactionSource = interactionSource_recenter,
+                                    indication = ripple(),
                                     onClick = {
                                         zoomInJob?.cancel()
                                         zoomOutJob?.cancel()
@@ -392,6 +419,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 Icon(
                                     imageVector = Icons.Filled.MyLocation,
                                     contentDescription = "Recenter map",
+                                    tint = mapButtonIcon,
                                     modifier = Modifier.padding(14.dp)
                                 )
                             }
@@ -401,7 +429,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                         // BUTTON: ZOOM IN
                         ShadowedButton( content = {
                             Surface(
-                                color = if (isPressed) gray_pale_subtle.copy(alpha = 0.7f) else gray_pale_subtle,
+                                color = if (isPressed) mapButtonBg.copy(alpha = 0.7f) else mapButtonBg,
                                 modifier = Modifier
                                     .padding(4.dp)
                                     .clip(RoundedCornerShape(18.dp))
@@ -413,7 +441,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                                 zoomOutJob?.cancel()
                                                 viewModel.sharedMapView?.let { mv ->
                                                     val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                    mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
+                                                    mv.setZoomLevel((currentZoom + 1).coerceIn(10, 20).toByte())
                                                 }
                                             },
                                             onLongPress = {
@@ -422,7 +450,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                                     while (true) {
                                                         viewModel.sharedMapView?.let { mv ->
                                                             val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                            mv.setZoomLevel((currentZoom + 1).coerceIn(13, 20).toByte())
+                                                            mv.setZoomLevel((currentZoom + 1).coerceIn(10, 20).toByte())
                                                         }
                                                         delay(150L)
                                                     }
@@ -444,6 +472,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 Icon(
                                     imageVector = Icons.Filled.Add,
                                     contentDescription = "Zoom in",
+                                    tint = mapButtonIcon,
                                     modifier = Modifier.padding(14.dp)
                                 )
                             }
@@ -452,7 +481,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                         // BUTTON: ZOOM OUT
                         ShadowedButton( content = {
                             Surface(
-                                color = gray_pale_subtle,
+                                color = if (isZoomOutPressed) mapButtonBg.copy(alpha = 0.7f) else mapButtonBg,
                                 modifier = Modifier
                                     .padding(4.dp)
                                     .clip(RoundedCornerShape(18.dp))
@@ -464,7 +493,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                                 zoomOutJob?.cancel()
                                                 viewModel.sharedMapView?.let { mv ->
                                                     val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                    mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
+                                                    mv.setZoomLevel((currentZoom - 1).coerceIn(10, 20).toByte())
                                                 }
                                             },
                                             onLongPress = {
@@ -473,7 +502,7 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                                     while (true) {
                                                         viewModel.sharedMapView?.let { mv ->
                                                             val currentZoom = mv.model.mapViewPosition.zoomLevel
-                                                            mv.setZoomLevel((currentZoom - 1).coerceIn(13, 20).toByte())
+                                                            mv.setZoomLevel((currentZoom - 1).coerceIn(10, 20).toByte())
                                                         }
                                                         delay(150L)
                                                     }
@@ -495,20 +524,16 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                                 Icon(
                                     imageVector = Icons.Filled.Remove,
                                     contentDescription = "Zoom out",
+                                    tint = mapButtonIcon,
                                     modifier = Modifier.padding(14.dp)
                                 )
                             }
                         })
                     }
+                    }
                 }
             }
 
-            if (isDrawing) {
-                Text(
-                    text = "Drawing active",
-                    modifier = Modifier.padding(8.dp)
-                )
-            }
         }
     }
 
@@ -523,7 +548,8 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                 showDeleteDialog = false
                 showDeleteVerificationDialogFromDelete = true
             },
-            onCancel = { showDeleteDialog = false }
+            onCancel = { showDeleteDialog = false },
+            isDarkMode = viewModel.darkMap
         )
     }
 
@@ -540,28 +566,35 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
            },
             onCancel = {
                 showDeleteVerificationDialogFromDelete = false
-            }
+            },
+            isDarkMode = viewModel.darkMap
         )
     }
     if(showDeleteVerificationDialogFromOptions){
         RouteDeleteVerificationDialog(
             onDeleteOnly = {
-                File(context.filesDir, viewModel.longPressedRecording!!).delete()
+                val deletedFileName = viewModel.longPressedRecording!!
+                File(context.filesDir, deletedFileName).delete()
                 viewModel.longPressedRecording = null
                 viewModel.refreshSavedRoutes()
+
+                if (viewModel.selectedRecording == deletedFileName) {
+                    viewModel.stopReplay()
+                }
 
                 showDeleteVerificationDialogFromOptions = false
             },
             onCancel = {
                 showDeleteVerificationDialogFromOptions = false
-            }
+            },
+            isDarkMode = viewModel.darkMap
         )
     }
 
     if(showSaveDialog){
-        RouteSaveDialog(
+        RouteNameDialog(
             isNameTaken = { candidateName -> viewModel.savedRoutes.contains("route_${candidateName}.json") },
-            onSaveAndDelete = {inputName ->
+            onConfirm = {inputName ->
                 viewModel.routeRecorder.stopAndSave(context, inputName)
                 viewModel.refreshSavedRoutes()
 
@@ -575,7 +608,10 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
             }, onBack = {
                 showSaveDialog = false
                 showDeleteDialog = true
-            }
+            },
+            primaryLabel = "Save and rename",
+            showSaveDefaultButton = true,
+            isDarkMode = viewModel.darkMap
         )
     }
 
@@ -584,14 +620,14 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
         if (showRenameDialog) {
             val currentFileName = viewModel.longPressedRecording!!
-            RouteRenameDialog(
+            RouteNameDialog(
                 initialName = currentFileName
                     .removePrefix("route_").removeSuffix(".json"),
                 isNameTaken = { candidateName ->
                     val candidateFileName = "route_${candidateName}.json"
                     viewModel.savedRoutes.any { it != currentFileName && it == candidateFileName }
                 },
-                onRename = { newName ->
+                onConfirm = { newName ->
                     val oldFile = File(context.filesDir, currentFileName)
                     val newFileName = "route_${newName}.json"
                     val newFile = File(context.filesDir, newFileName)
@@ -603,11 +639,13 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                     viewModel.longPressedRecording = null
                     viewModel.refreshSavedRoutes()
                 },
-                onBack = { showRenameDialog = false }
+                onBack = { showRenameDialog = false },
+                primaryLabel = "Rename",
+                isDarkMode = viewModel.darkMap
             )
         } else {
             RouteOptionsDialog(
-                routeName = viewModel.selectedRecording,
+                routeName = viewModel.longPressedRecording,
                 onRename = { showRenameDialog = true },
                 onExport = {
                     viewModel.exportRoute(context, viewModel.longPressedRecording!!)
@@ -620,7 +658,8 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
                     viewModel.longPressedRecording = null
                 },
                 onDelete = { showDeleteVerificationDialogFromOptions = true },
-                onCancel = { viewModel.longPressedRecording = null }
+                onCancel = { viewModel.longPressedRecording = null },
+                isDarkMode = viewModel.darkMap
             )
         }
     }
@@ -630,29 +669,27 @@ fun Page_Home(context: Context, viewModel: HomeViewModel) {
 
 /* DIALOG BOXES */
 @Composable
-fun DialogBox(onDismiss: () -> Unit, title: String, subTitle: String?, buttonsWithSpacers: @Composable () -> Unit){
+fun DialogBox(onDismiss: () -> Unit, title: String, subTitle: String?, isDarkMode: Boolean = false, buttonsWithSpacers: @Composable () -> Unit){
+    val colors = appColors(isDarkMode)
     Dialog(onDismissRequest = onDismiss){
-        Surface(shape = RoundedCornerShape(16.dp)) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = colors.dialogSurface
+        ) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     title,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 20.sp,
-                    color = text_main
+                    color = colors.foreground
                 )
                 if(subTitle != null){
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(subTitle, fontSize = 16.sp, color = gray_dark)
+                    Text(subTitle, fontSize = 16.sp, color = colors.dialogSubtitle)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
 
                 buttonsWithSpacers()
-
-                /*Spacer(modifier = Modifier.height(4.dp))
-
-                TextButton(onClick = onDismiss, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                    Text("Cancel", textDecoration = TextDecoration.Underline, color = gray_medium)
-                }*/
             }
         }
     }
@@ -665,29 +702,25 @@ private fun RouteOptionsDialog(
     onExport: () -> Unit,
     onSaveToDevice: () -> Unit,
     onDelete: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    isDarkMode: Boolean = false
 ) {
-    DialogBox(onDismiss = onCancel, title = "$routeName", subTitle = "Select an option:", buttonsWithSpacers = {
-        OutlinedButton(onClick = onRename, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_blue)) {
+    val dialogText = appColors(isDarkMode).foreground
+    DialogBox(onDismiss = onCancel, title = "$routeName", subTitle = "Select an option:", isDarkMode = isDarkMode, buttonsWithSpacers = {
+        TextButton(onClick = onRename, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().background(gray_light_subtle, RoundedCornerShape(16.dp))) {
             Text("Rename", color = text_main)
         }
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        OutlinedButton(onClick = onExport, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_blue)) {
-            Text("Share", color = text_main)
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        OutlinedButton(onClick = onSaveToDevice, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_blue)) {
+        TextButton(onClick = onSaveToDevice, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().background(gray_light_subtle, RoundedCornerShape(16.dp))) {
             Text("Save to device", color = text_main)
         }
 
         Spacer(modifier = Modifier.height(4.dp))
 
         OutlinedButton(onClick = onDelete, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_red)) {
-            Text("Delete", color = text_main)
+            Text("Delete", color = dialogText)
         }
     })
 }
@@ -698,19 +731,21 @@ private fun RouteDeleteDialog(
     viewModel: HomeViewModel,
     onSaveAndDelete: () -> Unit,
     onDeleteOnly: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    isDarkMode: Boolean = false
 ) {
-    DialogBox(onDismiss = onCancel, title = "Delete history", subTitle = "Do you want to save this route before deleting it?", buttonsWithSpacers = {
+    val dialogText = appColors(isDarkMode).foreground
+    DialogBox(onDismiss = onCancel, title = "Delete history", subTitle = "Do you want to save this route before deleting it?", isDarkMode = isDarkMode, buttonsWithSpacers = {
         if (viewModel.selectedRecording == null) {
             OutlinedButton(onClick = onSaveAndDelete, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_blue)) {
-                Text("Save and delete", color = text_main)
+                Text("Save and delete", color = dialogText)
             }
         }
 
         Spacer(modifier = Modifier.height(4.dp))
 
         OutlinedButton(onClick = onDeleteOnly, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_red)) {
-            Text("Delete", color = text_main)
+            Text("Delete", color = dialogText)
         }
     })
 }
@@ -719,11 +754,12 @@ private fun RouteDeleteDialog(
 @Composable
 private fun RouteDeleteVerificationDialog(
     onDeleteOnly: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    isDarkMode: Boolean = false
 ) {
-    DialogBox(onDismiss = onCancel, title = "", subTitle = "Are you sure you want to delete this route?", buttonsWithSpacers = {
+    DialogBox(onDismiss = onCancel, title = "", subTitle = "Are you sure you want to delete this route?", isDarkMode = isDarkMode, buttonsWithSpacers = {
         OutlinedButton(onClick = onDeleteOnly, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_red)) {
-            Text("Delete", color = text_main)
+            Text("Delete", color = appColors(isDarkMode).foreground)
         }
     })
 }
@@ -731,9 +767,9 @@ private fun RouteDeleteVerificationDialog(
 
 /* ROUTE NAMING
 Route names become part of a file name ("route_<name>.json"), so the allowed character set has
-to stay safe for the filesystem (no path separators, no "." to rule out ".."/extension games,
-no other filesystem-special characters) - but within that constraint, normal punctuation
-(spaces, hyphens, underscores, apostrophes) is fine and much less strict than letters/digits-only. */
+to stay safe for the filesystem (no filesystem-special characters); but normal punctuation
+(spaces, hyphens, underscores, apostrophes) is fine
+*/
 private const val ROUTE_NAME_MIN_LENGTH = 3
 private const val ROUTE_NAME_MAX_LENGTH = 15
 
@@ -744,87 +780,37 @@ private fun isValidRouteName(name: String): Boolean =
     name.trim().length in ROUTE_NAME_MIN_LENGTH..ROUTE_NAME_MAX_LENGTH
 
 @Composable
-private fun RouteSaveDialog(
+private fun RouteNameDialog(
+    initialName: String = "",
     isNameTaken: (String) -> Boolean,
-    onSaveAndDelete: (String) -> Unit,
-    onBack: () -> Unit
+    onConfirm: (String) -> Unit,
+    onBack: () -> Unit,
+    primaryLabel: String,
+    showSaveDefaultButton: Boolean = false,
+    isDarkMode: Boolean = false
 ) {
-    var inputName by remember { mutableStateOf("") }
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    val trimmedName = inputName.trim()
-    val nameTaken = trimmedName.isNotEmpty() && isNameTaken(trimmedName)
-    val canSave = isValidRouteName(inputName) && !nameTaken
-
-    fun submit() {
-        if (canSave) {
-            onSaveAndDelete(trimmedName)
-            keyboardController?.hide()
-        }
-    }
-
-    DialogBox(onDismiss = onBack, title = "Rename route", subTitle = "Enter new name:", buttonsWithSpacers = {
-        OutlinedTextField(
-            value = inputName,
-            onValueChange = { input ->
-                val filtered = filterNameInput(input)
-                if (filtered.length <= ROUTE_NAME_MAX_LENGTH) inputName = filtered
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { submit() }),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        if (nameTaken) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                "A route with this name already exists",
-                color = accentColor_red,
-                fontSize = 13.sp,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.SpaceBetween) {
-            OutlinedButton(
-                onClick = { submit() },
-                enabled = canSave, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_green)) {
-                Text("Save and rename", color = text_main)
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            OutlinedButton(onClick = { onSaveAndDelete("") }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_blue)) {
-                Text("Save default", color = text_main)
-            }
-        }
-    })
-}
-
-
-@Composable
-private fun RouteRenameDialog(
-    initialName: String,
-    isNameTaken: (String) -> Boolean,
-    onRename: (String) -> Unit,
-    onBack: () -> Unit
-) {
+    /*
+    Shared by the "save recording before deleting" flow (empty initialName, an extra "Save
+    default" button that skips straight to onConfirm("")) and the saved-route rename flow
+    (pre-filled initialName, no extra button)
+    */
     var inputName by remember { mutableStateOf(initialName) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val colors = appColors(isDarkMode)
+    val dialogText = colors.foreground
 
     val trimmedName = inputName.trim()
     val nameTaken = trimmedName != initialName.trim() && isNameTaken(trimmedName)
-    val canRename = isValidRouteName(inputName) && !nameTaken
+    val canConfirm = isValidRouteName(inputName) && !nameTaken
 
     fun submit() {
-        if (canRename) {
-            onRename(trimmedName)
+        if (canConfirm) {
+            onConfirm(trimmedName)
             keyboardController?.hide()
         }
     }
 
-    DialogBox(onDismiss = onBack, title = "Rename route", subTitle = "Enter new name:", buttonsWithSpacers = {
+    DialogBox(onDismiss = onBack, title = "Rename route", subTitle = "Enter new name:", isDarkMode = isDarkMode, buttonsWithSpacers = {
         OutlinedTextField(
             value = inputName,
             onValueChange = { input ->
@@ -834,6 +820,10 @@ private fun RouteRenameDialog(
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() }),
+            colors = if (isDarkMode) OutlinedTextFieldDefaults.colors(
+                focusedTextColor = colors.foreground, unfocusedTextColor = colors.foreground,
+                unfocusedBorderColor = colors.divider, cursorColor = colors.foreground
+            ) else OutlinedTextFieldDefaults.colors(),
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -852,8 +842,14 @@ private fun RouteRenameDialog(
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.SpaceBetween) {
             OutlinedButton(
                 onClick = { submit() },
-                enabled = canRename, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_green)) {
-                Text("Rename", color = text_main)
+                enabled = canConfirm, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border= BorderStroke(width = 2.dp, color = accentColor_green)) {
+                Text(primaryLabel, color = dialogText)
+            }
+            if (showSaveDefaultButton) {
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedButton(onClick = { onConfirm("") }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(width = 2.dp, color = accentColor_blue)) {
+                    Text("Save default", color = dialogText)
+                }
             }
         }
     })

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -44,28 +45,33 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.pwlski04.swissstep.accentColor_main
-import io.github.pwlski04.swissstep.accentColor_main_subtle
-import io.github.pwlski04.swissstep.gray_light
 import io.github.pwlski04.swissstep.defaultColorMap
 import io.github.pwlski04.swissstep.colorMap
 import io.github.pwlski04.swissstep.hiddenMovementTypes
-import io.github.pwlski04.swissstep.text_contrast
 import io.github.pwlski04.swissstep.tracking.MovementType
 import io.github.pwlski04.swissstep.ui.home.HomeViewModel
 import io.github.pwlski04.swissstep.ui.home.InverseCornerBox
+import io.github.pwlski04.swissstep.ui.theme.accentColor_main
+import io.github.pwlski04.swissstep.ui.theme.accentColor_main_subtle
+import io.github.pwlski04.swissstep.ui.theme.appColors
+import io.github.pwlski04.swissstep.ui.theme.dialog_subtitle_dark
+import io.github.pwlski04.swissstep.ui.theme.dialog_surface_dark
+import io.github.pwlski04.swissstep.ui.theme.divider_dark
+import io.github.pwlski04.swissstep.ui.theme.gray_light
+import io.github.pwlski04.swissstep.ui.theme.text_contrast
+import io.github.pwlski04.swissstep.ui.theme.text_main_dark
 
 import com.github.skydoves.colorpicker.compose.HsvColorPicker
 import com.github.skydoves.colorpicker.compose.AlphaSlider
 import com.github.skydoves.colorpicker.compose.BrightnessSlider
 import com.github.skydoves.colorpicker.compose.rememberColorPickerController
 import io.github.pwlski04.swissstep.R
-import io.github.pwlski04.swissstep.accentColor_blue
-import io.github.pwlski04.swissstep.accentColor_green
-import io.github.pwlski04.swissstep.gray_light_subtle
-import io.github.pwlski04.swissstep.page_background
-import io.github.pwlski04.swissstep.text_main
+import io.github.pwlski04.swissstep.ui.theme.accentColor_blue
+import io.github.pwlski04.swissstep.ui.theme.accentColor_green
+import io.github.pwlski04.swissstep.ui.theme.accentColor_red
+import io.github.pwlski04.swissstep.ui.theme.text_main
 import io.github.pwlski04.swissstep.ui.home.DialogBox
+import io.github.pwlski04.swissstep.ui.home.ExportResult
 import io.github.pwlski04.swissstep.ui.home.ShadowedButton
 import io.github.pwlski04.swissstep.ui.home.filterNameInput
 
@@ -79,29 +85,44 @@ fun handleColorSelect(movementType: MovementType, color: Int, viewModel: HomeVie
 @Composable
 fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
     /*
-    Settings screen. The logo bar at the bottom of this composable is pinned to the top of
-    the screen (Alignment.TopCenter) while everything else scrolls underneath it; its actual
-    rendered height is measured via onGloballyPositioned and fed back in as a spacer at the
-    top of the scrolling content, so nothing gets hidden behind the pinned bar.
+    Settings screen. The logo bar pinned to the top of the screen, while everything else scrolls
+    underneath it.
     */
+
+    val pixelDensity = LocalDensity.current
+    var logoBarHeight by remember { mutableStateOf(0.dp) }
+
+    val isDark = viewModel.darkMap
+    val colors = appColors(isDark)
+    val pageBg = colors.background
+    val pageFg = colors.foreground
+    val pageDivider = colors.divider
+    val pageMuted = colors.muted
+    val topBarAccent = colors.accentSubtle
+
+    var showNameDialog by remember { mutableStateOf(false) }
     var inputName by remember { mutableStateOf("") }
 
-    // "Save all to device": system document picker, so "device files" is always a destination
-    // regardless of which share-target apps are installed (unlike viewModel.exportAllRoutes).
-    val saveAllToDeviceLauncher = rememberLauncherForActivityResult(
+    // "Export" button
+    val exportAllLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         uri?.let { viewModel.saveAllRoutesToDevice(context, it) }
     }
-    var showNameDialog by remember { mutableStateOf(false) }
 
-    val density = LocalDensity.current
-    var logoBarHeight by remember { mutableStateOf(0.dp) }
+    // "Import" button
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.importRoute(context, it) }
+    }
+
+
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier
             .fillMaxSize()
-            .background(page_background)
+            .background(pageBg)
             .verticalScroll(rememberScrollState())) {
             Spacer(modifier = Modifier.height(logoBarHeight))
             Spacer(modifier = Modifier.height(32.dp))
@@ -114,9 +135,9 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    color = page_background,
+                    color = pageBg,
                     modifier = Modifier.clip(shape = RoundedCornerShape(28.dp))
-                        .border(2.dp, gray_light_subtle, RoundedCornerShape(28.dp))
+                        .border(2.dp, pageDivider, RoundedCornerShape(28.dp))
                         .combinedClickable(
                             onClick = {}, onLongClick = { showNameDialog = true }
                         )) {
@@ -136,7 +157,7 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                                 imageVector = Icons.Outlined.AccountCircle,
                                 contentDescription = "Profile image",
                                 modifier = Modifier.size(40.dp),
-                                tint = text_main
+                                tint = pageFg
                             )
                         }
 
@@ -145,7 +166,7 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                         Text(
                             text = viewModel.userName,
                             overflow = TextOverflow.Ellipsis,
-                            color = text_main,
+                            color = pageFg,
                             fontSize = 20.sp
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -157,28 +178,29 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp)){
                 SettingsGroup(
-                    "Preferences",
+                    "Preferences", titleColor = pageFg,
                     {
-                        SwitchSetting(
-                            name ="Dark mode", description = "Toggle dark mode", checked = false, onCheckedChange = { }
+                        ToggleSetting(
+                            name ="Dark mode", description = "Toggle dark mode", textColor = pageFg, offColor = pageMuted,
+                            checked = viewModel.darkMap, onCheckedChange = { viewModel.darkMap = it }
                         )
-                        Divider(thickness = 2.dp, color = gray_light_subtle)
+                        Divider(thickness = 2.dp, color = pageDivider)
 
-                        SwitchSetting(
-                            name ="Location points", description ="Overlay the points used for the displayed segments",
+                        ToggleSetting(
+                            name ="Location points", description ="Overlay the points for the displayed route", textColor = pageFg, offColor = pageMuted,
                             checked = viewModel.showLocationPoints, onCheckedChange = { viewModel.showLocationPoints = it }
                         )
-                        Divider(thickness = 2.dp, color = gray_light_subtle)
+                        Divider(thickness = 2.dp, color = pageDivider)
 
-                        SwitchSetting(
-                            name ="Custom path colors", description ="Customize the colors of your walked paths",
+                        ToggleSetting(
+                            name ="Customize path", description ="Tap movement type to select color, long press to show/hide", textColor = pageFg, offColor = pageMuted,
                             checked = viewModel.showPathColorChoice, onCheckedChange = { viewModel.showPathColorChoice = it }
                         )
                         if(viewModel.showPathColorChoice){
-                            Column(modifier = Modifier.border(2.dp, gray_light_subtle,
+                            Column(modifier = Modifier.border(2.dp, pageDivider,
                                 RoundedCornerShape(18.dp))){
                                 for (movementType in MovementType.entries.filter { it != MovementType.STILL }) {
-                                    MovementColorPicker(movementType = movementType, viewModel = viewModel)
+                                    MovementColorPicker(movementType = movementType, viewModel = viewModel, textColor = pageFg, mutedColor = pageMuted, isDarkMode = isDark)
                                     Spacer(modifier = Modifier.height(8.dp))
                                 }
                             }
@@ -192,7 +214,7 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp)) {
                 SettingsGroup(
-                    "Routes",
+                    "Routes", titleColor = pageFg,
                     {
                         Row(modifier = Modifier
                             .fillMaxWidth()
@@ -201,37 +223,49 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                             ShadowedButton(content = {
                                 Row(modifier = Modifier.height(60.dp).width(140.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(gray_light_subtle)
-                                    .clickable(onClick = { saveAllToDeviceLauncher.launch("export_all_routes.json") }),     // for share instead: onClick = { viewModel.exportAllRoutes(context) }
+                                    .background(pageDivider)
+                                    .clickable(onClick = { exportAllLauncher.launch("export_all_routes.json") }),     // for share instead: onClick = { viewModel.exportAllRoutes(context) }
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Center
                                 ){
                                     Icon(
                                         imageVector = Icons.Outlined.FileDownload,
-                                        tint = text_main,
+                                        tint = pageFg,
                                         contentDescription = ("Download routes"),
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Export", color = text_main)
+                                    Text("Export", color = pageFg)
                                 }
                             })
                             ShadowedButton(content = {
                                 Row(modifier = Modifier.height(60.dp).width(140.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(gray_light_subtle)
-                                    .clickable(onClick = { saveAllToDeviceLauncher.launch("export_all_routes.json") }),
+                                    .background(pageDivider)
+                                    .clickable(onClick = { importLauncher.launch(arrayOf("application/json")) }),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Center
                                 ){
                                     Icon(
                                         imageVector = Icons.Outlined.FileUpload,
-                                        tint = text_main,
+                                        tint = pageFg,
                                         contentDescription = ("Upload routes"),
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Import", color = text_main)
+                                    Text("Import", color = pageFg)
                                 }
                             })
+                        }
+
+                        when (val result = viewModel.importResult) {
+                            is ExportResult.Success -> Text(
+                                "Imported successfully: ${result.displayName}",
+                                color = accentColor_green, fontSize = 14.sp
+                            )
+                            is ExportResult.Failure -> Text(
+                                "Import failed",
+                                color = accentColor_red, fontSize = 14.sp
+                            )
+                            null -> {}
                         }
                     }
                 )
@@ -244,21 +278,21 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
                 .onGloballyPositioned { coordinates ->
-                    logoBarHeight = with(density) { coordinates.size.height.toDp() }
+                    logoBarHeight = with(pixelDensity) { coordinates.size.height.toDp() }
                 }
         ) {
             // Solid backing so the translucent accent color doesn't show scrolled content through it
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .background(page_background)
+                    .background(pageBg)
             )
 
             Column(modifier = Modifier.fillMaxWidth()) {
                 // Bar — fills status bar area only, notch hangs below it
                 Box(modifier = Modifier
                     .fillMaxWidth()
-                    .background(accentColor_main_subtle)) {
+                    .background(topBarAccent)) {
                     Spacer(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -274,7 +308,7 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                         modifier = Modifier
                             .weight(1f)
                             .background(
-                                accentColor_main_subtle,
+                                topBarAccent,
                                 shape = RoundedCornerShape(bottomEnd = 18.dp)
                             )
                     ) {
@@ -310,7 +344,7 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                         }
                     }
                     InverseCornerBox(
-                        color = accentColor_main_subtle,
+                        color = topBarAccent,
                         cornerRadius = 12.dp,
                         isLeft = false,
                         modifier = Modifier.size(12.dp)
@@ -325,6 +359,7 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
             onDismiss = { showNameDialog = false },
             title = "Display name",
             subTitle = null,
+            isDarkMode = isDark,
             buttonsWithSpacers = {
                 OutlinedTextField(
                     value = inputName,
@@ -336,19 +371,27 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
+                    colors = if (isDark) OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = accentColor_main_subtle,
+                        focusedTextColor = text_main_dark, unfocusedTextColor = text_main_dark,
+                        unfocusedBorderColor = divider_dark, cursorColor = text_main_dark
+                    ) else OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = accentColor_main_subtle)
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
+                val canSaveName = inputName.trim().length >= 3 && inputName.length <= 15
 
                 TextButton(
                     onClick = {
                         viewModel.userName = inputName
                         showNameDialog = false
                     },
-                    shape = RoundedCornerShape(16.dp), modifier = Modifier.width(100.dp).background(color = accentColor_blue, shape = RoundedCornerShape(16.dp))
+                    enabled = canSaveName,
+                    shape = RoundedCornerShape(16.dp), modifier = Modifier.width(100.dp).background(
+                        color = if (canSaveName) accentColor_blue else accentColor_blue.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(16.dp))
                 ) {
                     Text("Done", color = text_contrast)
                 }
@@ -358,13 +401,13 @@ fun Page_Preferences(context: Context, viewModel: HomeViewModel) {
 }
 
 @Composable
-fun SettingsGroup(title: String, content: @Composable () -> Unit){
+fun SettingsGroup(title: String, titleColor: ComposeColor = text_main, content: @Composable () -> Unit){
     Column(modifier = Modifier
         .fillMaxWidth()
         .padding(8.dp)){
         Spacer(modifier = Modifier.height(40.dp))
 
-        Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        Text(text = title, color = titleColor, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -375,33 +418,36 @@ fun SettingsGroup(title: String, content: @Composable () -> Unit){
 }
 
 @Composable
-fun SwitchSetting(
+fun ToggleSetting(
     name: String = "Example", description: String = "This is the default description for the example setting.",
+    textColor: ComposeColor = text_main,
+    offColor: ComposeColor = gray_light,
     checked: Boolean, onCheckedChange: (Boolean) -> Unit
 ){
     Row(modifier = Modifier
         .fillMaxWidth()
         .padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)){
-            Text(name, fontSize = 16.sp)
-            Text(description, fontSize = 12.sp)
+            Text(name, color = textColor, fontSize = 16.sp)
+            Text(description, color = textColor, fontSize = 12.sp)
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        SquareSwitch(checked, onCheckedChange)
+        Toggle(checked, onCheckedChange, offColor = offColor)
     }
     Spacer(modifier = Modifier.height(8.dp))
 }
 
 
 @Composable
-fun SquareSwitch(
+fun Toggle(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    offColor: ComposeColor = gray_light,
     modifier: Modifier = Modifier
 ) {
-    val trackColor = if (checked) accentColor_green else gray_light
+    val trackColor = if (checked) accentColor_green else offColor
     val thumbOffset by animateDpAsState(targetValue = if (checked) 18.dp else 0.dp)
 
     Box(
@@ -422,8 +468,11 @@ fun SquareSwitch(
 }
 
 @Composable
-fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
-    /* One row per movement type: tap opens the color-editing dialog, long-press instead toggles whether that movement type's paths are hidden on the map (hiddenMovementTypes). */
+fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel, textColor: ComposeColor = AltColor(0,0,0), mutedColor: ComposeColor = gray_light, isDarkMode: Boolean = false){
+    /*
+    One row per movement type: tap opens the color-editing dialog, long-press instead toggles
+    whether that movement type's paths are hidden on the map (hiddenMovementTypes).
+    */
     var showDialog by remember {mutableStateOf(false)}
     val currentColor = colorMap[movementType] ?: Color.GRAY
     val hexCode = remember { mutableStateOf("") }
@@ -444,7 +493,7 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(modifier = Modifier.width(80.dp),
-            color = if(hiddenMovementTypes.contains(movementType)) gray_light else AltColor(0,0,0),
+            color = if(hiddenMovementTypes.contains(movementType)) mutedColor else textColor,
             text = movementType.name.lowercase().replaceFirstChar { it.uppercase() },
             fontSize = 16.sp
         )
@@ -453,7 +502,7 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
             if (hiddenMovementTypes.contains(movementType))
                 Icon(
                     imageVector = Icons.Filled.VisibilityOff,
-                    tint = gray_light,
+                    tint = mutedColor,
                     contentDescription = ("Hide " + movementType),
                 )
             else
@@ -470,6 +519,9 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
 
         AlertDialog(
             onDismissRequest = { showDialog = false },
+            containerColor = if (isDarkMode) dialog_surface_dark else AlertDialogDefaults.containerColor,
+            titleContentColor = if (isDarkMode) text_main_dark else AlertDialogDefaults.titleContentColor,
+            textContentColor = if (isDarkMode) text_main_dark else AlertDialogDefaults.textContentColor,
             title = { Text(movementType.name.lowercase().replaceFirstChar { it.uppercase() }) },
             text = {
                 Column {
@@ -500,6 +552,11 @@ fun MovementColorPicker(movementType: MovementType, viewModel: HomeViewModel){
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Hex") },
+                        colors = if (isDarkMode) OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = text_main_dark, unfocusedTextColor = text_main_dark,
+                            unfocusedBorderColor = divider_dark,
+                            focusedLabelColor = dialog_subtitle_dark, unfocusedLabelColor = dialog_subtitle_dark
+                        ) else OutlinedTextFieldDefaults.colors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

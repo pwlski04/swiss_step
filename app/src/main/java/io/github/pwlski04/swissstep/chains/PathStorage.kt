@@ -39,12 +39,29 @@ class PathStorage {
     private val COMMIT_THRESHOLD = 1
     private val pendingSpawn = HashMap<MovementType, Int>()
 
+    // Consecutive misses against the CURRENT (possibly long-stale/wrong) primary that each
+    // independently found a plausible nearby segment, and stayed close to the previous one -
+    // i.e. a coherent new trajectory forming while the old hypothesis is still technically
+    // "active". Without this, those points are pure misses and get discarded outright; only
+    // once missCount crosses HARD_RESET_THRESHOLD/MISS_THRESHOLD does a fresh chain start,
+    // and only from whichever point happened to trigger that reset - silently losing every
+    // consistent point that came before it.
+    private data class MissBufferEntry(val point: LatLong, val timestamp: Long)
+    private val missBuffers = HashMap<MovementType, MutableList<MissBufferEntry>>()
+    private val MISS_BUFFER_CONSISTENCY_DISTANCE = 0.002
+    private val MISS_BUFFER_TRIGGER_SIZE = 3
+
     var onChainRemoved: ((Long) -> Unit)? = null
     var onChainsChanged: (() -> Unit)? = null
     var lastActiveMovementType: MovementType = MovementType.TRANSPORT
 
     private val FILE_NAME = "walked_chains.json"
+    private val LOG_FILE_NAME = "walked_chains.log"
     private val json = Json { prettyPrint = false; ignoreUnknownKeys = true }
+
+    // Buffered LogAppend entries (new-point diffs + removal tombstones) waiting to be
+    // flushed to LOG_FILE_NAME by the next save().
+    private val pendingLogEntries = mutableListOf<LogAppend>()
 
 
     /* ── GPS entry point ── */
@@ -96,40 +113,58 @@ class PathStorage {
             current = parentMap[current]
         }
 
+        // Revisit/collapse must never look further back than where THIS call started
+        // appending: its job is to catch a single BFS path reconstruction doubling back on
+        // itself (this call's own points), not to second-guess already-committed history
+        // from earlier calls. A real, slow loop walk (someone wandering a small area) will
+        // routinely pass within a couple meters of its own earlier path over many separate
+        // commits - that's genuine progress, not a spike, and retroactively deleting it back
+        // to the "revisited" point destroyed most of the walk on tight/slow routes.
+        val callStartSize = chain.points.size
+
+        // Appends one point, then immediately runs the collapse/revisit cleanup against it.
+        // Must run after EVERY individual point, not once per segment: a segment can
+        // contribute two points (its near and far endpoint), and if the first of those two
+        // is itself the point that revisits earlier chain history, checking only the second
+        // (final) point of the pair would miss it entirely - the real revisit had already
+        // been buried under one more point by the time the check ran.
+        fun appendAndCollapse(point: LatLong) {
+            chain.points.addLast(point)
+
+            while (chain.points.size - callStartSize >= 3) {
+                val n = chain.points.size
+                if (chain.points[n - 1].distanceTo(chain.points[n - 3]) < 0.00002) {
+                    chain.points.removeAt(n - 1)
+                    chain.points.removeAt(n - 2)
+                } else break
+            }
+
+            if (chain.points.size - callStartSize >= 3) {
+                val last = chain.points.last()
+                val searchFrom = maxOf(callStartSize, chain.points.size - 8)
+                val revisitIdx = (searchFrom until chain.points.size - 1)
+                    .lastOrNull { chain.points[it].distanceTo(last) < 0.00002 }
+                if (revisitIdx != null) {
+                    while (chain.points.size > revisitIdx + 1) chain.points.removeLast()
+                }
+            }
+        }
+
         var lastPoint = lastPointIn
         for (seg in path) {
             val s = seg.startingPoint
             val e = seg.endingPoint
             val appendStart = lastPoint.distanceTo(s) <= lastPoint.distanceTo(e)
             if (appendStart) {
-                if (lastPoint.distanceTo(s) > 0.00001) chain.points.addLast(s)
-                chain.points.addLast(e)
+                if (lastPoint.distanceTo(s) > 0.00001) appendAndCollapse(s)
+                appendAndCollapse(e)
                 lastPoint = e
             } else {
-                if (lastPoint.distanceTo(e) > 0.00001) chain.points.addLast(e)
-                chain.points.addLast(s)
+                if (lastPoint.distanceTo(e) > 0.00001) appendAndCollapse(e)
+                appendAndCollapse(s)
                 lastPoint = s
             }
-
-            while (chain.points.size >= 3) {
-                val n = chain.points.size
-                if (chain.points[n - 1].distanceTo(chain.points[n - 3]) < 0.00002) {
-                    chain.points.removeAt(n - 1)
-                    chain.points.removeAt(n - 2)
-                    if (chain.points.isNotEmpty()) lastPoint = chain.points.last()
-                } else break
-            }
-
-            if (chain.points.size >= 4) {
-                val last = chain.points.last()
-                val searchFrom = maxOf(0, chain.points.size - 8)
-                val revisitIdx = (searchFrom until chain.points.size - 1)
-                    .lastOrNull { chain.points[it].distanceTo(last) < 0.00002 }
-                if (revisitIdx != null) {
-                    while (chain.points.size > revisitIdx + 1) chain.points.removeLast()
-                    if (chain.points.isNotEmpty()) lastPoint = chain.points.last()
-                }
-            }
+            chain.points.lastOrNull()?.let { lastPoint = it }
         }
         chain.dirty = true
     }
@@ -149,7 +184,7 @@ class PathStorage {
     }
 
     @Synchronized
-    fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex) {
+    fun onGpsPoint(gpsPoint: LatLong, movementType: MovementType, index: SegmentIndex, now: Long = System.currentTimeMillis()) {
         /*
         Main entry point: feeds one GPS fix into the per-movement-type tracking state
         machine. Maintains a "primary" hypothesis (the segment/chain we believe we're
@@ -164,13 +199,8 @@ class PathStorage {
         if (movementType == MovementType.STILL) return
 
         lastActiveMovementType = movementType
-        val now = System.currentTimeMillis()
 
         val bkps = backups.getOrPut(movementType) { mutableListOf() }
-
-        if (primary[movementType]?.let { now - it.timestamp > LIVE_GAP_THRESHOLD_MS } == true) {
-            removePrimary(movementType)
-        }
         bkps.removeAll { now - it.timestamp > LIVE_GAP_THRESHOLD_MS }
 
         var currentPrimary = primary[movementType]
@@ -180,6 +210,7 @@ class PathStorage {
             if (!staleButNearby) {
                 primary.remove(movementType)
                 bkps.clear()
+                missBuffers[movementType]?.clear()
                 currentPrimary = null
             }
         }
@@ -207,29 +238,36 @@ class PathStorage {
             ?.let { pointToSegmentDistance(gpsPoint, it) }
             ?: Double.MAX_VALUE
 
+        val timeStale = now - currentPrimary.timestamp > LIVE_GAP_THRESHOLD_MS  // Only time WITH spatial gap implausible
+
         if (distToPrimary < MAX_CONTINUITY_DISTANCE) {
+            missBuffers[movementType]?.clear()
             currentPrimary.missCount = 0
             currentPrimary.pointCount++
             currentPrimary.score += distToPrimary
             currentPrimary.timestamp = now
 
-            if (bestForPrimary !== currentPrimary.lastSegment) {
-                if (bestForPrimary === currentPrimary.pendingSegment) {
-                    currentPrimary.pendingCount++
-                    if (currentPrimary.pendingCount >= COMMIT_THRESHOLD) {
-                        extendChainWithPath(
-                            currentPrimary.chain, parentMap,
-                            bestForPrimary!!, currentPrimary.chain.points.last()
-                        )
-                        currentPrimary.lastSegment = bestForPrimary!!
-                        currentPrimary.lastCommitGpsPoint = gpsPoint
-                        currentPrimary.chain.dirty = true
-                        currentPrimary.pendingSegment = null
-                        currentPrimary.pendingCount = 0
-                    }
-                } else {
+            if (bestForPrimary === currentPrimary.previousSegment) {
+                // Hold the current segment instead of oscillating
+                currentPrimary.pendingSegment = null
+                currentPrimary.pendingCount = 0
+            } else if (bestForPrimary !== currentPrimary.lastSegment) {
+                if (bestForPrimary !== currentPrimary.pendingSegment) {
                     currentPrimary.pendingSegment = bestForPrimary
-                    currentPrimary.pendingCount = 1
+                    currentPrimary.pendingCount = 0
+                }
+                currentPrimary.pendingCount++
+                if (currentPrimary.pendingCount >= COMMIT_THRESHOLD) {
+                    extendChainWithPath(
+                        currentPrimary.chain, parentMap,
+                        bestForPrimary!!, currentPrimary.chain.points.last()
+                    )
+                    currentPrimary.previousSegment = currentPrimary.lastSegment
+                    currentPrimary.lastSegment = bestForPrimary!!
+                    currentPrimary.lastCommitGpsPoint = gpsPoint
+                    currentPrimary.chain.dirty = true
+                    currentPrimary.pendingSegment = null
+                    currentPrimary.pendingCount = 0
                 }
             } else {
                 currentPrimary.pendingSegment = null
@@ -239,7 +277,13 @@ class PathStorage {
                 if (chainLast != null) {
                     val far = if (chainLast.distanceTo(bestForPrimary!!.startingPoint) < chainLast.distanceTo(bestForPrimary.endingPoint))
                         bestForPrimary.endingPoint else bestForPrimary.startingPoint
-                    if (chainLast.distanceTo(far) > 0.00001 && gpsPoint.distanceTo(far) < gpsPoint.distanceTo(chainLast)) {
+                    // On a long segment, GPS jitter can briefly make the endpoint we just came
+                    // from look closer than the one we're heading to - naively comparing only
+                    // gpsPoint's distance to "far" vs chainLast would then backtrack onto a
+                    // point already visited, drawing a real there-and-back spike on the segment.
+                    val cameFrom = currentPrimary.chain.points.getOrNull(currentPrimary.chain.points.size - 2)
+                    val wouldBacktrack = cameFrom != null && cameFrom.distanceTo(far) < 0.00002
+                    if (!wouldBacktrack && chainLast.distanceTo(far) > 0.00001 && gpsPoint.distanceTo(far) < gpsPoint.distanceTo(chainLast)) {
                         currentPrimary.chain.points.addLast(far)
                         currentPrimary.chain.dirty = true
                     }
@@ -276,10 +320,45 @@ class PathStorage {
                     .none { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE * 2.0 }
             }
 
+        } else if (timeStale) {
+            // Unresolvable gap (spatially discontinuous + primary not updated fora  while) => spawn fresh immediately
+            primary.remove(movementType)
+            bkps.clear()
+            missBuffers[movementType]?.clear()
+            spawnFreshPrimary(gpsPoint, movementType, index, now)
+            return
         } else {
             currentPrimary.missCount++
             currentPrimary.pendingSegment = null
             currentPrimary.pendingCount = 0
+
+            // Three or more independently plausible misses in a row means a coherent new trajectory has already formed
+            val missBuffer = missBuffers.getOrPut(movementType) { mutableListOf() }
+            val independentCandidate = index.nearbySegments(gpsPoint.latitude, gpsPoint.longitude)
+                .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
+                .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
+            if (independentCandidate != null) {
+                val lastBuffered = missBuffer.lastOrNull()
+                if (lastBuffered != null && gpsPoint.distanceTo(lastBuffered.point) >= MISS_BUFFER_CONSISTENCY_DISTANCE) {
+                    missBuffer.clear()
+                }
+                missBuffer.add(MissBufferEntry(gpsPoint, now))
+            } else {
+                missBuffer.clear()
+            }
+
+            if (missBuffer.size >= MISS_BUFFER_TRIGGER_SIZE) {
+                val first = missBuffer.first()
+                val rest = missBuffer.drop(1)
+                missBuffer.clear()
+                primary.remove(movementType)
+                bkps.clear()
+                spawnFreshPrimary(first.point, movementType, index, first.timestamp)
+                for (entry in rest) {
+                    onGpsPoint(entry.point, movementType, index, entry.timestamp)
+                }
+                return
+            }
 
             if (currentPrimary.missCount >= HARD_RESET_THRESHOLD) {
                 primary.remove(movementType)
@@ -292,7 +371,8 @@ class PathStorage {
             val closeReanchor = index.nearbySegments(gpsPoint.latitude, gpsPoint.longitude)
                 .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
                 .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
-            if (closeReanchor != null) {
+
+            if (closeReanchor != null && closeReanchor !== currentPrimary.previousSegment) {
                 val lastPoint = currentPrimary.chain.points.last()
                 val jumpDist = minOf(
                     lastPoint.distanceTo(closeReanchor.startingPoint),
@@ -300,6 +380,7 @@ class PathStorage {
                 )
                 if (jumpDist <= MAX_CONTINUITY_DISTANCE) {
                     extendChain(currentPrimary.chain, closeReanchor, lastPoint)
+                    currentPrimary.previousSegment = currentPrimary.lastSegment
                     currentPrimary.lastSegment = closeReanchor
                     currentPrimary.lastCommitGpsPoint = gpsPoint
                     currentPrimary.missCount = 0
@@ -320,8 +401,10 @@ class PathStorage {
                     backup.pointCount++
                     backup.score += pointToSegmentDistance(gpsPoint, bestForBackup)
                     backup.timestamp = now
-                    if (bestForBackup !== backup.lastSegment) {
+
+                    if (bestForBackup !== backup.lastSegment && bestForBackup !== backup.previousSegment) {
                         extendChainWithPath(backup.chain, bParentMap, bestForBackup, backup.chain.points.last())
+                        backup.previousSegment = backup.lastSegment
                         backup.lastSegment = bestForBackup
                         backup.lastCommitGpsPoint = gpsPoint
                     }
@@ -346,7 +429,7 @@ class PathStorage {
                     val reanchor = index.nearbySegments(gpsPoint.latitude, gpsPoint.longitude)
                         .filter { pointToSegmentDistance(gpsPoint, it) < MAX_CONTINUITY_DISTANCE }
                         .minByOrNull { pointToSegmentDistance(gpsPoint, it) + highwayPenalty(it.highway, movementType) }
-                    if (reanchor != null) {
+                    if (reanchor != null && reanchor !== currentPrimary.previousSegment) {
                         val lastPoint = currentPrimary.chain.points.last()
                         val jumpDist = minOf(
                             lastPoint.distanceTo(reanchor.startingPoint),
@@ -354,6 +437,7 @@ class PathStorage {
                         )
                         if (jumpDist <= MAX_CONTINUITY_DISTANCE) {
                             extendChain(currentPrimary.chain, reanchor, lastPoint)
+                            currentPrimary.previousSegment = currentPrimary.lastSegment
                             currentPrimary.lastSegment = reanchor
                             currentPrimary.lastCommitGpsPoint = gpsPoint
                             currentPrimary.missCount = 0
@@ -433,7 +517,20 @@ class PathStorage {
         /* Discards the current primary hypothesis and its chain (e.g. before replacing it with a backup or a fresh spawn). */
         val pri = primary.remove(movementType) ?: return
         chains[movementType]?.remove(pri.chain)
+        tombstoneIfLogged(pri.chain, movementType)
         onChainRemoved?.invoke(pri.chain.id)
+    }
+
+    private fun tombstoneIfLogged(chain: PathChain, movementType: MovementType) {
+        /*
+        Called whenever a chain is dropped/absorbed outside the normal per-tick save() flow
+        (a stale hypothesis, or mergeChainsByType() folding it into another chain). If it had
+        already reached the log/checkpoint, a bare removal from `chains` isn't enough - a
+        crash before the next checkpoint would otherwise replay the log and resurrect it.
+        */
+        if (chain.loggedPointCount > 0) {
+            pendingLogEntries.add(LogAppend(chainId = chain.id, movementType = movementType, removed = true))
+        }
     }
 
     /*
@@ -512,7 +609,7 @@ class PathStorage {
             val chainList = chains[movementType] ?: continue
             if (chainList.size <= 1) continue
 
-            val threshold = 0.00005
+            val threshold = MAX_CONTINUITY_DISTANCE
             fun quantize(v: Double) = (v / threshold).toLong()
             fun LatLong.key() = Pair(quantize(latitude), quantize(longitude))
 
@@ -550,6 +647,7 @@ class PathStorage {
                         if (tailSlot.isHead) b.points.forEach { chain.points.addLast(it) }
                         else b.points.reversed().forEach { chain.points.addLast(it) }
                         chainList.remove(b)
+                        tombstoneIfLogged(b, movementType)
                         onChainRemoved?.invoke(b.id)
                         chain.dirty = true
                         merged = true; break
@@ -558,9 +656,10 @@ class PathStorage {
                     val headSlot = lookup(idx, chain.points.first().key(), chain)
                     if (headSlot != null) {
                         val b = headSlot.chain
-                        if (!headSlot.isHead) b.points.forEach { chain.points.addFirst(it) }
-                        else b.points.reversed().forEach { chain.points.addFirst(it) }
+                        if (!headSlot.isHead) b.points.reversed().forEach { chain.points.addFirst(it) }
+                        else b.points.forEach { chain.points.addFirst(it) }
                         chainList.remove(b)
+                        tombstoneIfLogged(b, movementType)
                         onChainRemoved?.invoke(b.id)
                         chain.dirty = true
                         merged = true; break
@@ -595,7 +694,7 @@ class PathStorage {
         briefly changed (e.g. walking -> waiting for a tram -> walking again).
         */
         val candidates = candidateTypes.flatMap { chains[it] ?: emptyList() }
-            .filter { it !== chain && it !== excludeChain }
+            .filter { it !== chain && it !== excludeChain && it.points.size >= 2 }
         val nearestChains = when (direction) {
             BridgeDirection.HEAD -> candidates.filter { it.id < chain.id }.sortedByDescending { it.id }
             BridgeDirection.TAIL -> candidates.filter { it.id > chain.id }.sortedBy { it.id }
@@ -618,13 +717,14 @@ class PathStorage {
     internal fun bridgeMovementTypeGaps(index: SegmentIndex?) {
         /*
         For every chain, tries to close the gap at its head and tail by connecting it to
-        the nearest plausible chain of a different movement type (falling back to the same
-        type only for TRANSPORT). Prefers routing the bridge along the actual road network
-        (findRoadPath); if no reasonable road path exists but the gap is small, falls back
+        the nearest plausible chain of a different movement type, falling back to a chain of
+        the same type if that's a better/only match (e.g. a signal dropout mid-walk, with no
+        other-type chain nearby to bridge to at all). Prefers routing the bridge along the
+        actual road network (findRoadPath); if no reasonable road path exists but the gap is small, falls back
         to just drawing a straight line between the two points.
         */
-        val threshold = 0.01
-        val straightLineFallbackThreshold = 0.0008
+        val threshold = 0.0015
+        val straightLineFallbackThreshold = threshold
 
         for (movementType in MovementType.entries) {
             val typeChains = chains[movementType] ?: continue
@@ -635,7 +735,7 @@ class PathStorage {
                 val headCheckPoints = (0 until minOf(5, chain.points.size)).map { it to chain.points[it] }
                 var headCandidate = findBestBridgeCandidate(chain, crossTypes, headCheckPoints, BridgeDirection.HEAD)
 
-                if (movementType == MovementType.TRANSPORT && (headCandidate == null || headCandidate.dist !in 0.00002..threshold)) {
+                if (headCandidate == null || headCandidate.dist !in 0.00002..threshold) {
                     headCandidate = findBestBridgeCandidate(chain, listOf(movementType), headCheckPoints, BridgeDirection.HEAD)
                 }
 
@@ -705,9 +805,7 @@ class PathStorage {
                 val tailCheckPoints = listOf(0 to tailPoint)
 
                 var tailCandidate = findBestBridgeCandidate(chain, crossTypes, tailCheckPoints, BridgeDirection.TAIL, excludeChain)
-                if (movementType == MovementType.TRANSPORT &&
-                    (tailCandidate == null || tailCandidate.dist !in 0.00002..threshold)
-                ) {
+                if (tailCandidate == null || tailCandidate.dist !in 0.00002..threshold) {
                     tailCandidate = findBestBridgeCandidate(chain, listOf(movementType), tailCheckPoints, BridgeDirection.TAIL, excludeChain)
                 }
                 val bestTailDist = tailCandidate?.dist ?: Double.MAX_VALUE
@@ -823,19 +921,73 @@ class PathStorage {
     @Synchronized
     fun save(context: Context) {
         /*
-        Writes to a temp file and renames it over the real file, so a crash/kill mid-write can't
-        leave a corrupted save.
+        Cheap, frequent persistence for live tracking: appends only what changed since the
+        last save/checkpoint (new points on a chain's tail, or a chain being dropped) to
+        LOG_FILE_NAME, instead of re-serializing the entire lifetime history every tick.
+
+        Falls back to a full checkpoint() if a chain's point count ever drops below what's
+        already been logged - that only happens via the revisit-trim cleanup in
+        extendChainWithPath() or a chain merge, neither of which is a pure tail-append and
+        so can't be represented as one.
+        */
+        var needsCheckpoint = false
+
+        synchronized(this) {
+            for ((movementType, list) in chains) {
+                for (chain in list) {
+                    val points = synchronized(chain) { chain.points.toList() }
+                    when {
+                        points.size > chain.loggedPointCount -> {
+                            pendingLogEntries.add(
+                                LogAppend(
+                                    chainId = chain.id,
+                                    movementType = movementType,
+                                    newPoints = points.subList(chain.loggedPointCount, points.size)
+                                        .map { StoredPoint(it.latitude, it.longitude) }
+                                )
+                            )
+                            chain.loggedPointCount = points.size
+                        }
+                        points.size < chain.loggedPointCount -> needsCheckpoint = true
+                    }
+                }
+            }
+        }
+
+        if (needsCheckpoint) {
+            checkpoint(context)
+            return
+        }
+
+        if (pendingLogEntries.isEmpty()) return
+
+        val logFile = File(context.filesDir, LOG_FILE_NAME)
+        logFile.appendText(pendingLogEntries.joinToString("") { json.encodeToString(it) + "\n" })
+        pendingLogEntries.clear()
+    }
+
+    @Synchronized
+    fun checkpoint(context: Context) {
+        /*
+        The expensive, infrequent full save: re-serializes every chain into the canonical
+        walked_chains.json snapshot, then clears the append log since everything in it is
+        now folded into that snapshot. Call this at natural "safe to consolidate" points
+        (session end, app foreground) rather than on every GPS tick.
+
+        Writes to a temp file and renames it over the real file, so a crash/kill mid-write
+        can't leave a corrupted save.
         */
         val snapshot = synchronized(this) {
             chains.entries.map { (movementType, list) ->
                 StoredMovementEntry(
                     movementType = movementType,
                     chains = list.map { chain ->
+                        val points = synchronized(chain) { chain.points.toList() }
+                        chain.loggedPointCount = points.size
                         StoredPathChain(
                             id = chain.id,
                             movementType = chain.movementType,
-                            points = synchronized(chain) { chain.points.toList() }
-                                .map { StoredPoint(it.latitude, it.longitude) }
+                            points = points.map { StoredPoint(it.latitude, it.longitude) }
                         )
                     }
                 )
@@ -847,13 +999,17 @@ class PathStorage {
         tmpFile.writeText(text)
         if (file.exists()) file.delete()
         tmpFile.renameTo(file)
+
+        File(context.filesDir, LOG_FILE_NAME).delete()
+        pendingLogEntries.clear()
     }
 
     @Synchronized
     fun load(context: Context) {
         /*
-        Loads chains from disk, replacing whatever's currently in memory. If the saved file is
-        unreadable/corrupt, deletes it.
+        Loads chains from the last checkpoint, then replays any append-log entries on top
+        of it (the durability window since that checkpoint; e.g. the process was killed
+        before the next one ran). If the checkpoint file is unreadable/corrupt, deletes it.
         */
         val file = File(context.filesDir, FILE_NAME)
         if (!file.exists()) return
@@ -861,18 +1017,20 @@ class PathStorage {
             val text = file.readText()
             val collection = json.decodeFromString<StoredChainCollection>(text)
             clearSegments()
+            val chainsById = HashMap<Long, PathChain>()
             for (entry in collection.entries) {
-                chains[entry.movementType]?.addAll(
-                    entry.chains.map { stored ->
-                        PathChain(
-                            id = stored.id,
-                            movementType = stored.movementType,
-                            points = ArrayDeque(stored.points.map { LatLong(it.lat, it.lon) }),
-                            dirty = true
-                        )
-                    }
-                )
+                for (stored in entry.chains) {
+                    val chain = PathChain(
+                        id = stored.id,
+                        movementType = stored.movementType,
+                        points = ArrayDeque(stored.points.map { LatLong(it.lat, it.lon) }),
+                        dirty = true
+                    ).also { it.loggedPointCount = it.points.size }
+                    chains[entry.movementType]?.add(chain)
+                    chainsById[chain.id] = chain
+                }
             }
+            replayLog(context, chainsById)
             nextChainId = chains.values.flatten().maxOfOrNull { it.id + 1 } ?: 0L
             onChainsChanged?.invoke()
         } catch (e: Exception) {
@@ -881,9 +1039,35 @@ class PathStorage {
         }
     }
 
+    private fun replayLog(context: Context, chainsById: MutableMap<Long, PathChain>) {
+        val logFile = File(context.filesDir, LOG_FILE_NAME)
+        if (!logFile.exists()) return
+        try {
+            logFile.forEachLine { line ->
+                if (line.isBlank()) return@forEachLine
+                val entry = json.decodeFromString<LogAppend>(line)
+                if (entry.removed) {
+                    chainsById.remove(entry.chainId)?.let { chain -> chains[entry.movementType]?.remove(chain) }
+                    return@forEachLine
+                }
+                val chain = chainsById.getOrPut(entry.chainId) {
+                    PathChain(id = entry.chainId, movementType = entry.movementType, points = ArrayDeque(), dirty = true)
+                        .also { chains[entry.movementType]?.add(it) }
+                }
+                entry.newPoints.forEach { chain.points.addLast(LatLong(it.lat, it.lon)) }
+                chain.loggedPointCount = chain.points.size
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            logFile.delete()
+        }
+    }
+
     fun deleteSaved(context: Context) {
         File(context.filesDir, FILE_NAME).delete()
         File(context.filesDir, "$FILE_NAME.tmp").delete()
+        File(context.filesDir, LOG_FILE_NAME).delete()
+        pendingLogEntries.clear()
     }
 }
 

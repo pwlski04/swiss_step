@@ -7,7 +7,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 
-/* TAG REMOVE (RECORDER): entire file */
 object AppRouteRecorder {
     var instance: RouteRecorder? = null
 }

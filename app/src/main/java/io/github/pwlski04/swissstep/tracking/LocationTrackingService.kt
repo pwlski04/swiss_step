@@ -55,57 +55,67 @@ class LocationTrackingService: Service() {
     private var pointsSinceLastSave = 0
     private val SAVE_INTERVAL = 10      // every ca. 50s in background, every ca. 10s in foreground
 
+    private var lastCheckpointTime = System.currentTimeMillis()
+    private val CHECKPOINT_INTERVAL_MS = 60 * 60 * 1000L      // fold the append log into a fresh snapshot hourly during long unattended sessions
+
     private var lastNotifiedMovementType: MovementType? = null
     private var lastNotifiedIsDrawing: Boolean? = null
     private var locationUpdatesStarted = false
 
     /* Notification */
+    private fun buildNotification(isDrawing: Boolean, movementType: MovementType): android.app.Notification {
+        return if (isDrawing) {
+            val movementText = when (movementType) {
+                MovementType.WALKING -> "walking"
+                MovementType.RUNNING -> "running"
+                MovementType.BIKING -> "biking"
+                MovementType.TRANSPORT -> "using transport"
+                MovementType.STILL -> "still"
+            }
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Tracking active")
+                .setContentText("Recording your route. Currently " + movementText + ".")
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setOngoing(true)
+                .setSilent(true)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setContentIntent(pendingIntent())
+                .setDeleteIntent(deleteIntent())
+                .build()
+        } else {
+            // Minimal silent notification required to keep foreground service alive
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("swiss step – location active")
+                .setSmallIcon(android.R.drawable.ic_dialog_map)
+                .setSilent(true)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)  // hidden from lock screen
+                .setContentIntent(pendingIntent())
+                .setDeleteIntent(deleteIntent())
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
+                .build()
+        }
+    }
+
     private fun showTrackingNotification(movementType: MovementType) {
-        /* Updates the ongoing notification's text to the current movement type, but only re-notifies when something actually changed (avoids spamming the notification manager on every GPS fix). */
+        /* Updates the ongoing notification's text to the current movement type, but only re-notifies when something actually changed */
         if (movementType == lastNotifiedMovementType && lastNotifiedIsDrawing == true) return
         lastNotifiedMovementType = movementType
         lastNotifiedIsDrawing = true
-        val movementText = when (movementType) {
-            MovementType.WALKING -> "walking"
-            MovementType.RUNNING -> "running"
-            MovementType.BIKING -> "biking"
-            MovementType.TRANSPORT -> "using transport"
-            MovementType.STILL -> "still"
-        }
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Tracking active")
-            .setContentText("Recording your route. Currently "+ movementText+".")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setOngoing(true)
-            .setSilent(true)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setContentIntent(pendingIntent())
-            .build()
 
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, notification)
+        manager.notify(NOTIFICATION_ID, buildNotification(true, movementType))
     }
 
     private fun showIdleNotification() {
         if (lastNotifiedIsDrawing == false) return
         lastNotifiedIsDrawing = false
         lastNotifiedMovementType = null
-        // Minimal silent notification required to keep foreground service alive
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("swiss step – location active")
-            .setSmallIcon(android.R.drawable.ic_dialog_map)
-            .setSilent(true)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)  // hidden from lock screen
-            .setContentIntent(pendingIntent())
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
-            .build()
 
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, notification)
+        manager.notify(NOTIFICATION_ID, buildNotification(false, MovementType.STILL))
     }
 
     private fun pendingIntent(): PendingIntent? {
@@ -120,19 +130,30 @@ class LocationTrackingService: Service() {
         }
     }
 
+    private fun deleteIntent(): PendingIntent {
+        /*
+        Android 14+ lets users swipe away ongoing/foreground-service notifications (setOngoing no
+        longer blocks it). The service itself keeps running either way, so instead of fighting the
+        platform we just detect the swipe and instantly re-post the notification.
+        */
+        val intent = Intent(this, LocationTrackingService::class.java)
+            .setAction(ACTION_NOTIFICATION_DISMISSED)
+        return PendingIntent.getService(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     private fun showForegroundNotification() {
         createNotificationChannel()
 
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("swiss step")
-            .setContentText("Location active.")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setSilent(true)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
-            .setContentIntent(pendingIntent())
-            .build()
+        // State-aware
+        val isDrawing = TrackingLiveState.isDrawing.value
+        val movementType = TrackingLiveState.movementType.value
+        lastNotifiedIsDrawing = isDrawing
+        lastNotifiedMovementType = if (isDrawing) movementType else null
+
+        val notification = buildNotification(isDrawing, movementType)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification,
@@ -169,6 +190,11 @@ class LocationTrackingService: Service() {
         */
 
         showForegroundNotification()
+
+        if (intent?.action == ACTION_NOTIFICATION_DISMISSED) {
+            // Don't touch session/location-update state for a regular notification swipe
+            return START_STICKY
+        }
 
         // Handle restart with null intent
         if (intent == null) {
@@ -311,7 +337,7 @@ class LocationTrackingService: Service() {
             val storage = AppPathStorage.instance ?: return
             val index   = AppSegmentIndex.instance ?: return
 
-            val inSwitzerland = location.latitude in 45.8..47.9 && location.longitude in 5.9..10.6
+            val inSwitzerland = location.latitude in 45.81796..47.80845 && location.longitude in 5.9559..10.49215
             if (inSwitzerland) {
                 val effectiveType = if (movementType != MovementType.STILL) {
                     storage.lastActiveMovementType = movementType
@@ -324,7 +350,8 @@ class LocationTrackingService: Service() {
                 storage.onGpsPoint(
                     LatLong(location.latitude, location.longitude),
                     effectiveType,
-                    index
+                    index,
+                    point.timestamp
                 )
             }
         } else {
@@ -335,8 +362,16 @@ class LocationTrackingService: Service() {
             pointsSinceLastSave++
             if (pointsSinceLastSave >= SAVE_INTERVAL) {
                 pointsSinceLastSave = 0
+                val dueForCheckpoint = System.currentTimeMillis() - lastCheckpointTime >= CHECKPOINT_INTERVAL_MS
+                if (dueForCheckpoint) lastCheckpointTime = System.currentTimeMillis()
                 serviceScope.launch(Dispatchers.IO) {
-                    AppPathStorage.instance?.save(applicationContext)
+                    // Normally a cheap append; only folds into a full rewrite once an hour so an
+                    // unattended multi-day session doesn't leave the log growing forever.
+                    if (dueForCheckpoint) {
+                        AppPathStorage.instance?.checkpoint(applicationContext)
+                    } else {
+                        AppPathStorage.instance?.save(applicationContext)
+                    }
                 }
             }
         }
@@ -432,6 +467,7 @@ class LocationTrackingService: Service() {
 
         private const val ACTION_FOREGROUND_UPDATES = "foreground_updates"
         private const val ACTION_BACKGROUND_UPDATES = "background_updates"
+        private const val ACTION_NOTIFICATION_DISMISSED = "notification_dismissed"
 
         var isRunning = false
 

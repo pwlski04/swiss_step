@@ -23,6 +23,7 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
     private val paintCache = HashMap<Pair<MovementType, Byte>, Paint>()
     private val projectionCache =
         ConcurrentHashMap<Long, HashMap<Byte, List<Pair<Double, Double>>>>()
+    private val bboxCache = HashMap<Long, BoundingBox>()
 
     var useCustomColors: Boolean = false
 
@@ -38,6 +39,14 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
         Called by Mapsforge to render this layer for the current viewport. Draws each
         movement type's chains in a fixed layering order, re-projecting a chain's points
         to screen coordinates only when its zoom-level cache is missing or stale.
+
+        Chains whose (cached) bounding box doesn't intersect the current viewport are
+        skipped entirely, so per-frame cost scales with how much history is actually near
+        where you're looking, not with total lifetime chain count. The bbox is recomputed
+        whenever a chain is dirty (or has never been cached) *before* the culling check, and
+        `dirty` is only cleared once a chain has actually been let through and redrawn -
+        so a chain that grows while off-screen keeps re-checking its bbox every frame
+        instead of getting stuck behind a stale "still off-screen" answer from before it grew.
         */
 
         if (!isDisplayed) return
@@ -56,13 +65,21 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
             val paint = getPaint(movementType, zoomLevel)
 
             for (chain in chains) {
+                if (chain.points.isEmpty()) continue
+
+                val cachedBBox = bboxCache[chain.id]
+                val bbox = if (chain.dirty || cachedBBox == null) {
+                    BoundingBox(synchronized(chain) { chain.points.toList() }).also { bboxCache[chain.id] = it }
+                } else cachedBBox
+                if (!bbox.intersects(boundingBox)) continue
+
                 val zoomCache = projectionCache.getOrPut(chain.id) { HashMap() }
                 if (chain.dirty || !zoomCache.containsKey(zoomLevel)) {
                     zoomCache.clear()
                     zoomCache[zoomLevel] = projectChain(chain, zoomLevel, dm)
-                    chain.dirty = false
                 }
                 drawProjectedChain(zoomCache[zoomLevel]!!, topLeftPoint, canvas, paint, w, h)
+                chain.dirty = false
             }
         }
     }
@@ -88,8 +105,9 @@ class PathOverlayLayer(private val pathStorage: PathStorage) : Layer() {
     }
 
     fun evictFromCache(chainId: Long) {
-        /* Drops a chain's cached screen-space projection, e.g. after it's removed from storage or merged into another chain. */
+        /* Drops a chain's cached screen-space projection and bounding box, e.g. after it's removed from storage or merged into another chain. */
         projectionCache.remove(chainId)
+        bboxCache.remove(chainId)
     }
 
     fun clearPaintCache(){

@@ -30,6 +30,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="swiss step"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.SwissStep">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

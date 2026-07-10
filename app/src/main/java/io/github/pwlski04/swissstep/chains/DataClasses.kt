@@ -12,7 +12,8 @@ data class PathChain(
     val id: Long,
     val movementType: MovementType,
     val points: ArrayDeque<LatLong>,
-    var dirty: Boolean = true
+    var dirty: Boolean = true,
+    var loggedPointCount: Int = 0        // how many leading points are already flushed to the append log/checkpoint
 )
 
 @Serializable
@@ -27,11 +28,25 @@ data class StoredPathChain(val id: Long, val movementType: MovementType, val poi
 @Serializable
 data class StoredPoint(val lat: Double, val lon: Double)
 
+/*
+One line of the append-only walked_chains.log: either new points tacked onto the end of
+a chain since the last save/checkpoint, or a tombstone marking a chain that was dropped
+(e.g. a stale hypothesis discarded via removePrimary) before it ever reached a checkpoint.
+*/
+@Serializable
+data class LogAppend(
+    val chainId: Long,
+    val movementType: MovementType,
+    val newPoints: List<StoredPoint> = emptyList(),
+    val removed: Boolean = false
+)
+
 
 data class PathHypothesis(
     val id: Long,
     val chain: PathChain,
     var lastSegment: Segment,
+    var previousSegment: Segment? = null,
     var timestamp: Long,
 
     var lastCommitGpsPoint: LatLong,

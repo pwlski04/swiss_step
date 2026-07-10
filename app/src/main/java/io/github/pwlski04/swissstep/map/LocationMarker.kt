@@ -95,10 +95,6 @@ fun LocationMarkerOverlay(
                 event?.action == MotionEvent.ACTION_POINTER_UP) {
                 zoomEventCounter.value++
             }
-            if (event?.action == MotionEvent.ACTION_UP ||
-                event?.action == MotionEvent.ACTION_POINTER_UP) {
-                zoomEventCounter.value++
-            }
             if (event?.action == MotionEvent.ACTION_UP) view.performClick()
             false
         }

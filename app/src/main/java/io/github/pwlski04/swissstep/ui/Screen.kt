@@ -1,5 +1,7 @@
 package io.github.pwlski04.swissstep.ui
 
+import android.app.Activity
+import android.graphics.drawable.ColorDrawable
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
@@ -9,7 +11,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,11 +23,12 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,46 +36,60 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.pwlski04.swissstep.ui.home.HomeViewModel
 import io.github.pwlski04.swissstep.ui.preferences.Page_Preferences
 import io.github.pwlski04.swissstep.ui.home.Page_Home
+import io.github.pwlski04.swissstep.ui.theme.AppColors
+import io.github.pwlski04.swissstep.ui.theme.appColors
 
 
 @Preview(showBackground = true)
 @Composable
 fun Screen() {
-    /*
-    App root: a plain `when(page)` switch between Home/Preferences, not Compose Navigation.
-    This means switching tabs fully removes the non-visible screen from composition (and
-    recreates it on return) rather than keeping it alive in a backstack — screen-local
-    `remember` state does not survive a tab switch, only state that lives on the shared
-    HomeViewModel does.
-    */
+    /* This function handles what is displayed on the screen (page, navigation bar) */
     val context = LocalContext.current
     val viewModel: HomeViewModel = viewModel()
     var page by rememberSaveable { mutableIntStateOf(0) }
 
-    Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0), bottomBar = {
-            NavBar(
-                currentPage = page, onPageChange = { newPage -> page = newPage },
-                modifier = Modifier
-            )
-        }) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            when (page) {
-                0 -> Page_Home(context, viewModel)
-                1 -> Page_Preferences(context, viewModel)
-                else -> Page_Home(context, viewModel)
+    val colors = appColors(viewModel.darkMap)
+
+    LaunchedEffect(colors.background) {
+        (context as? Activity)?.window?.setBackgroundDrawable(ColorDrawable(colors.background.toArgb()))
+    }
+
+    val pixelDensity = LocalDensity.current
+    var navBarHeight by remember { mutableStateOf(0.dp) }
+
+    Box(modifier = Modifier.fillMaxSize().background(colors.background)){
+        Box(modifier = Modifier.fillMaxSize().padding(bottom = navBarHeight)) {
+            Page_Home(context, viewModel)
+        }
+
+        if (page == 1) {
+            // Preferences page renders over home page
+            Box(modifier = Modifier.fillMaxSize().background(colors.background))
+
+            Box(modifier = Modifier.fillMaxSize().padding(bottom = navBarHeight)) {
+                Page_Preferences(context, viewModel)
             }
         }
+
+        NavBar(
+            currentPage = page, onPageChange = { newPage -> page = newPage },
+            colors = colors,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onGloballyPositioned { coordinates ->
+                    navBarHeight = with(pixelDensity) { coordinates.size.height.toDp() }
+                }
+        )
     }
 }
 
@@ -81,13 +97,11 @@ fun Screen() {
 /*COMPONENT: NAVIGATION BAR*/
 
 @Composable
-fun NavBar(modifier: Modifier = Modifier, currentPage: Int, onPageChange: (Int) -> Unit) {
-    val selectedColor = Color(red = 0, green = 0, blue = 0, 0); // used to be alpha 32
-
+fun NavBar(modifier: Modifier = Modifier, currentPage: Int, onPageChange: (Int) -> Unit, colors: AppColors) {
     Row(
         modifier
             .fillMaxWidth()
-            .background(Color(red = 240, green = 240, blue = 240, 144), shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
+            .background(colors.navbarBg, shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceAround,
@@ -96,17 +110,19 @@ fun NavBar(modifier: Modifier = Modifier, currentPage: Int, onPageChange: (Int) 
             modifier  = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)),
             icon = if (currentPage == 1) Icons.Outlined.Home else Icons.Filled.Home,
             description = "Home",
+            contentColor = colors.navbarContent,
             onClick = { onPageChange(0) })
         NavBarIsland(
             modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)),
             icon = if (currentPage == 0) Icons.Outlined.Person else Icons.Filled.Person,
             description = "Profile",
+            contentColor = colors.navbarContent,
             onClick = { onPageChange(1) })
     }
 }
 
 @Composable
-fun NavBarIsland(modifier: Modifier, icon: ImageVector?, description: String, onClick: () -> Unit) {
+fun NavBarIsland(modifier: Modifier, icon: ImageVector?, description: String, contentColor: Color = Color.Black, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
@@ -116,11 +132,11 @@ fun NavBarIsland(modifier: Modifier, icon: ImageVector?, description: String, on
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
             if (icon != null) {
-                Icon(imageVector = icon, contentDescription = description, tint = Color.Black)
+                Icon(imageVector = icon, contentDescription = description, tint = contentColor)
             }
         }
 
         Spacer(modifier = Modifier.height(4.dp))
-        Text(text = description, color = Color.Black)
+        Text(text = description, color = contentColor)
     }
 }

@@ -4,11 +4,14 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.pwlski04.swissstep.chains.PathOverlayLayer
@@ -16,10 +19,12 @@ import io.github.pwlski04.swissstep.chains.PathStorage
 import io.github.pwlski04.swissstep.paths.SegmentDatabase
 import io.github.pwlski04.swissstep.paths.SegmentIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.mapsforge.map.android.view.MapView
 import io.github.pwlski04.swissstep.map.copyAssetToInternalStorage
+import io.github.pwlski04.swissstep.map.setMapTheme
 import io.github.pwlski04.swissstep.tracking.AppPathStorage
 import io.github.pwlski04.swissstep.tracking.AppSegmentIndex
 import io.github.pwlski04.swissstep.tracking.TrackingLiveState
@@ -39,6 +44,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.mapsforge.core.model.LatLong
@@ -47,7 +53,7 @@ import java.io.File
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
-    // HOME PAGE
+    /* HOME PAGE */
     val routeRecorder = RouteRecorder()
     var isReplayingRoute by mutableStateOf(false)
 
@@ -67,9 +73,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     var mapFilePath by mutableStateOf<String?>(null)
     var themeFilePath by mutableStateOf<String?>(null)
+    private var lightThemeFilePath: String? = null
+    private var darkThemeFilePath: String? = null
     var errorMessage by mutableStateOf<String?>(null)
     var segmentIndex by mutableStateOf<SegmentIndex?>(null)
-    private var wasDrawing: Boolean
 
     var hasChainsToDisplay by mutableStateOf(false)
         private set
@@ -89,7 +96,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         object Stop : ReplayRequest()
     }
 
-    var exportResult by mutableStateOf<ExportResult?>(null)
+    // Import and export both auto-clear themselves ~2.5s after being set to non-null
+    private val _exportResult = mutableStateOf<ExportResult?>(null)
+    var exportResult: ExportResult?
+        get() = _exportResult.value
+        set(value) = setAutoClearing(_exportResult, value)
+
+    private val _importResult = mutableStateOf<ExportResult?>(null)
+    var importResult: ExportResult?
+        get() = _importResult.value
+        set(value) = setAutoClearing(_importResult, value)
+
+    private fun setAutoClearing(state: MutableState<ExportResult?>, value: ExportResult?) {
+        state.value = value
+        if (value != null) {
+            viewModelScope.launch {
+                delay(2500)
+                if (state.value == value) state.value = null
+            }
+        }
+    }
 
 
     var savedRoutes = mutableStateListOf<String>()
@@ -121,6 +147,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             _showLocationPoints = value
             prefs.edit().putBoolean("showLocationPoints", value).apply()
         }
+
+    private var _darkMap by mutableStateOf(prefs.getBoolean("darkMap", false))
+    var darkMap: Boolean
+        get() = _darkMap
+        set(value) {
+            _darkMap = value
+            prefs.edit().putBoolean("darkMap", value).apply()
+            applyMapTheme()
+        }
+
+    private fun applyMapTheme() {
+        val newThemeFilePath = if (darkMap) darkThemeFilePath else lightThemeFilePath
+        if (newThemeFilePath == null) return
+        themeFilePath = newThemeFilePath
+        sharedMapView.setMapTheme(newThemeFilePath, darkMap)
+    }
 
     private var _showPathColorChoice by mutableStateOf(prefs.getBoolean("showPathColorChoice", false))
     var showPathColorChoice: Boolean
@@ -169,7 +211,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /* Are we drawing the chains? (e.g. for start/stop buttons) */
         val restoredIsDrawing = loadIsDrawing(getApplication()) && LocationTrackingService.isRunning
         TrackingLiveState.isDrawing.value = restoredIsDrawing
-        wasDrawing = restoredIsDrawing
 
         /* Chain existence check (link to chain operations, for current application) */
         pathStorage.onChainsChanged = { refreshHasChains() }
@@ -230,12 +271,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val context = getApplication<Application>()
-                val (mapPath, themePath) = withContext(Dispatchers.IO) {
-                    copyAssetToInternalStorage(context, "switzerland.map") to
-                            copyAssetToInternalStorage(context, "minmap.xml")
+                val (mapPath, lightThemePath, darkThemePath) = withContext(Dispatchers.IO) {
+                    Triple(
+                        copyAssetToInternalStorage(context, "switzerland.map"),
+                        copyAssetToInternalStorage(context, "map_light.xml"),
+                        copyAssetToInternalStorage(context, "map_dark.xml")
+                    )
                 }
                 mapFilePath = mapPath
-                themeFilePath = themePath
+                lightThemeFilePath = lightThemePath
+                darkThemeFilePath = darkThemePath
+                themeFilePath = if (darkMap) darkThemePath else lightThemePath
 
                 segmentIndex = withContext(Dispatchers.IO) {
                     val dbPath = copyAssetToInternalStorage(context, "switzerland_paths.db")
@@ -295,9 +341,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveChainsNow() {
-        /* This stores walked paths to storage. */
+        /*
+        Always follows finalizeSession()+mergeChainsByType(), whose chain-merging can
+        prepend/drop points in ways the incremental save() can't represent
+        */
         viewModelScope.launch(Dispatchers.IO) {
-            pathStorage.save(getApplication())
+            pathStorage.checkpoint(getApplication())
         }
     }
 
@@ -312,7 +361,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopReplay() {
-        /* Requests replay to stop via the same debounced request queue as replayRoute(), so a stop racing a just-started play is handled in order rather than corrupting replayStorage. */
+        /*
+        Requests replay to stop via the same debounced request queue as replayRoute(), so a stop
+        racing a just-started play is handled in order rather than corrupting replayStorage.
+        */
         isReplayingRoute = false
         selectedRecording = null
         replayProgress.value = 0f
@@ -343,6 +395,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         Loads a saved route into replayStorage and re-walks it through onGpsPoint() as if it
         were live, point by point. Skips points that are too close in distance/time.
         */
+
+        if (segmentIndex == null) {
+            snapshotFlow { segmentIndex }.first { it != null }
+        }
 
         withContext(Dispatchers.Main) {
             pathOverlayLayer.isDisplayed = false
@@ -410,7 +466,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     replayStorage.lastActiveMovementType
                 }
-                replayStorage.onGpsPoint(LatLong(lat, lon), effectiveType, index)
+                replayStorage.onGpsPoint(LatLong(lat, lon), effectiveType, index, timestamp)
             }
         }
 
@@ -433,7 +489,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         runBlocking(Dispatchers.IO) {
             pathStorage.finalizeSession()
             pathStorage.mergeChainsByType()
-            pathStorage.save(getApplication())
+            pathStorage.checkpoint(getApplication())
         }
         sharedMapView?.let { mv ->
             mv.destroyAll()
@@ -576,6 +632,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         return json.encodeToString(RouteBundle.serializer(), RouteBundle(routes)) to fileNames.size
     }
 
+    private fun queryDisplayName(context: Context, uri: Uri): String? {
+        /* Looks up the picked document's own file name (e.g. via the system picker), since the content Uri itself carries no readable name. */
+        return context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+        }
+    }
+
     fun importRoute(context: Context, uri: Uri) {
         /*
         Accepts either a single exported route or a bundle of many (from
@@ -585,7 +649,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         */
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream == null) {
+                    Log.e("SwissStep_TAG", "Failed to import route: openInputStream returned null for $uri")
+                    withContext(Dispatchers.Main) { importResult = ExportResult.Failure("route") }
+                    return@launch
+                }
                 val text = inputStream.bufferedReader().readText()
                 inputStream.close()
 
@@ -597,24 +666,36 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     null
                 }
 
-                if (bundle != null) {
+                val resultName = if (bundle != null) {
                     for ((originalFileName, route) in bundle.routes) {
                         val newFileName = uniqueRouteFileName(context, originalFileName)
                         File(context.filesDir, newFileName)
                             .writeText(json.encodeToString(RecordedRoute.serializer(), route))
                     }
+                    "all routes (${bundle.routes.size})"
                 } else {
                     json.decodeFromString<RecordedRoute>(text)  // throws if invalid
 
-                    val newFileName = uniqueRouteFileName(context, "route_${System.currentTimeMillis()}.json")
+                    // Replay list still shows the name the route was originally saved/exported under
+                    val pickedName = queryDisplayName(context, uri)?.removeSuffix(".json")?.let { filterNameInput(it) }?.trim()
+                    val baseFileName = if (!pickedName.isNullOrBlank()) {
+                        if (pickedName.startsWith("route_")) "$pickedName.json" else "route_${pickedName}.json"
+                    } else {
+                        "route_${System.currentTimeMillis()}.json"
+                    }
+
+                    val newFileName = uniqueRouteFileName(context, baseFileName)
                     File(context.filesDir, newFileName).writeText(text) // saving
+                    newFileName.removePrefix("route_").removeSuffix(".json")
                 }
 
                 withContext(Dispatchers.Main) {
                     refreshSavedRoutes()
+                    importResult = ExportResult.Success(resultName)
                 }
             } catch (e: Exception) {
                 Log.e("SwissStep_TAG", "Failed to import route", e)
+                withContext(Dispatchers.Main) { importResult = ExportResult.Failure("route") }
             }
         }
     }

@@ -15,6 +15,7 @@ fun OfflineMapScreen(
     modifier: Modifier = Modifier,
     mapFilePath: String,
     themeFilePath: String,
+    isDarkMode: Boolean,
     existingMapView: MapView?,
     onMapReady: (MapView) -> Unit
 ) {
@@ -25,7 +26,7 @@ fun OfflineMapScreen(
     val context = LocalContext.current
 
     val mapView = remember(existingMapView) {
-        existingMapView ?: createMapView(context, mapFilePath, themeFilePath)
+        existingMapView ?: createMapView(context, mapFilePath, themeFilePath, isDarkMode)
     }
 
     LaunchedEffect(mapView) {

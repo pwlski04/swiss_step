@@ -20,6 +20,9 @@ fun strokeWidthComputer(zoom: Float): Float {
     val inputWidth = 20f
 
     return when (zoom) {
+        10f -> 0.3f
+        11f -> 0.6f
+        12f -> 1.25f
         13f -> 2.5f
         14f -> 5f
         15f -> 10f

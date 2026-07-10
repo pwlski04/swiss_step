@@ -14,8 +14,6 @@ data class Segment(
 )
 
 
-/* OLD: */
-
 data class PathPoint (
     val lat: Double,
     val lon: Double,
